@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="AI Email Automation System — Intelligent email management powered by Google Gemini AI">
+  <title>AI Email Automation System — Sign In</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="auth-body">
+  <div class="auth-container">
+    <!-- Decorative background orbs -->
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+
+    <div class="auth-card" id="authCard">
+      <div class="auth-logo">
+        <div class="logo-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+          </svg>
+        </div>
+        <h1>AI Email Automation System</h1>
+        <p class="auth-subtitle">Intelligent inbox management powered by AI</p>
+      </div>
+
+      <!-- Error/Success message -->
+      <div class="auth-message" id="authMessage" style="display:none;"></div>
+
+      <!-- Tab switcher -->
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tabSignIn" onclick="switchTab('signin')">Sign In</button>
+        <button class="auth-tab" id="tabSignUp" onclick="switchTab('signup')">Sign Up</button>
+      </div>
+
+      <!-- Sign In Form -->
+      <form id="signinForm" class="auth-form" onsubmit="handleSignIn(event)">
+        <div class="form-group">
+          <label for="loginEmail">Email Address</label>
+          <div class="input-wrapper">
+            <span class="input-icon">@</span>
+            <input type="email" id="loginEmail" placeholder="you@example.com" required autocomplete="email">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="loginPassword">Password</label>
+          <div class="input-wrapper">
+            <span class="input-icon">🔒</span>
+            <input type="password" id="loginPassword" placeholder="••••••••" required autocomplete="current-password">
+            <button type="button" class="toggle-password" onclick="togglePasswordVisibility('loginPassword', this)" aria-label="Show password">
+              <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="forgot-password-link">
+          <a href="#" onclick="showForgotPasswordForm(event)">Forgot Password?</a>
+        </div>
+        <button type="submit" class="auth-btn" id="signinBtn">
+          <span>Sign In</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+      </form>
+
+      <!-- Sign Up Form -->
+      <form id="signupForm" class="auth-form" style="display:none;" onsubmit="handleSignUp(event)">
+        <div class="form-group">
+          <label for="signupEmail">Email Address</label>
+          <div class="input-wrapper">
+            <span class="input-icon">@</span>
+            <input type="email" id="signupEmail" placeholder="you@example.com" required autocomplete="email">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="signupPassword">Password</label>
+          <div class="input-wrapper">
+            <span class="input-icon">🔒</span>
+            <input type="password" id="signupPassword" placeholder="Password (9-10 chars)" required minlength="9" maxlength="10" autocomplete="new-password">
+            <button type="button" class="toggle-password" onclick="togglePasswordVisibility('signupPassword', this)" aria-label="Show password">
+              <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </button>
+          </div>
+          <div class="password-requirements" id="passwordRequirements">
+            <div class="requirement-item" id="reqLength"><span class="req-icon">❌</span> 9-10 characters</div>
+            <div class="requirement-item" id="reqCapital"><span class="req-icon">❌</span> At least one capital letter</div>
+            <div class="requirement-item" id="reqLower"><span class="req-icon">❌</span> At least one lowercase letter</div>
+            <div class="requirement-item" id="reqSpecial"><span class="req-icon">❌</span> At least one special character</div>
+            <div class="requirement-item" id="reqNoSpace"><span class="req-icon">❌</span> No spaces allowed</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="confirmPassword">Confirm Password</label>
+          <div class="input-wrapper">
+            <span class="input-icon">🔒</span>
+            <input type="password" id="confirmPassword" placeholder="Repeat password" required minlength="9" maxlength="10" autocomplete="new-password">
+            <button type="button" class="toggle-password" onclick="togglePasswordVisibility('confirmPassword', this)" aria-label="Show password">
+              <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <button type="submit" class="auth-btn" id="signupBtn">
+          <span>Create Account</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </button>
+      </form>
+
+      <!-- Forgot Password Form -->
+      <form id="forgotForm" class="auth-form" style="display:none;" onsubmit="handleRequestOTP(event)">
+        <div class="form-group">
+          <label for="forgotEmail">Email Address</label>
+          <div class="input-wrapper">
+            <span class="input-icon">@</span>
+            <input type="email" id="forgotEmail" placeholder="you@example.com" required autocomplete="email">
+          </div>
+        </div>
+        <button type="submit" class="auth-btn" id="forgotBtn">
+          <span>Send OTP</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+        <div class="back-to-login">
+          <a href="#" onclick="switchTab('signin'); event.preventDefault();">Back to Sign In</a>
+        </div>
+      </form>
+
+      <!-- Reset Password Form -->
+      <form id="resetForm" class="auth-form" style="display:none;" onsubmit="handleResetPassword(event)">
+        <div class="form-group">
+          <label for="resetEmail">Email Address</label>
+          <div class="input-wrapper">
+            <span class="input-icon">@</span>
+            <input type="email" id="resetEmail" placeholder="you@example.com" required readonly autocomplete="email">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="resetOTP">OTP Code</label>
+          <div class="input-wrapper">
+            <span class="input-icon">🔢</span>
+            <input type="text" id="resetOTP" placeholder="123456" required pattern="[0-9]{6}" inputmode="numeric" maxlength="6">
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="resetPassword">New Password</label>
+          <div class="input-wrapper">
+            <span class="input-icon">🔒</span>
+            <input type="password" id="resetPassword" placeholder="Password (9-10 chars)" required minlength="9" maxlength="10" autocomplete="new-password">
+            <button type="button" class="toggle-password" onclick="togglePasswordVisibility('resetPassword', this)" aria-label="Show password">
+              <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </button>
+          </div>
+          <div class="password-requirements" id="resetPasswordRequirements">
+            <div class="requirement-item" id="resetReqLength"><span class="req-icon">❌</span> 9-10 characters</div>
+            <div class="requirement-item" id="resetReqCapital"><span class="req-icon">❌</span> At least one capital letter</div>
+            <div class="requirement-item" id="resetReqLower"><span class="req-icon">❌</span> At least one lowercase letter</div>
+            <div class="requirement-item" id="resetReqSpecial"><span class="req-icon">❌</span> At least one special character</div>
+            <div class="requirement-item" id="resetReqNoSpace"><span class="req-icon">❌</span> No spaces allowed</div>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="confirmResetPassword">Confirm New Password</label>
+          <div class="input-wrapper">
+            <span class="input-icon">🔒</span>
+            <input type="password" id="confirmResetPassword" placeholder="Repeat password" required minlength="9" maxlength="10" autocomplete="new-password">
+            <button type="button" class="toggle-password" onclick="togglePasswordVisibility('confirmResetPassword', this)" aria-label="Show password">
+              <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <button type="submit" class="auth-btn" id="resetBtn">
+          <span>Reset Password</span>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        </button>
+        <div class="back-to-login">
+          <a href="#" onclick="switchTab('signin'); event.preventDefault();">Back to Sign In</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/auth.js"></script>
+</body>
+</html>
