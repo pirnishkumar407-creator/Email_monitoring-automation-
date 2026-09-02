@@ -7,8 +7,19 @@ import re
 import argparse
 import urllib.request
 import urllib.error
+import urllib.parse
 import email as email_module
 from datetime import datetime, timedelta, timezone
+
+# Ensure robust UTF-8 printing on Windows console
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 
 # Optional dependencies
 try:
@@ -38,7 +49,7 @@ EXCEL_FILE = os.path.join(os.path.dirname(__file__), '..', 'data', 'exports', 'l
 
 MOCK_EMAILS = [
     {
-        "sender": "client-services@techcorp.com",
+        "sender": "sarah.jenkins@techcorp.com",
         "subject": "Quote Request: Custom Web Application Development",
         "body": "Hi team,\n\nWe are looking to develop a customer portal for our retail branch. We require features like auth, payment gateways, and a beautiful analytics dashboard. Our budget is around $25,000, and we need this ready in 3 months. Can you send us a quote?\n\nBest regards,\nSarah Jenkins\nDirector of Operations, TechCorp",
         "priority": "Medium",
@@ -52,6 +63,37 @@ MOCK_EMAILS = [
             "Schedule an introductory call with Sarah."
         ],
         "draft_reply": "Subject: Re: Quote Request: Custom Web Application Development\n\nDear Sarah,\n\nThank you for reaching out to us. We would be delighted to assist TechCorp in developing your retail customer portal. Your budget of $25,000 and timeline of 3 months align with our capabilities.\n\nTo provide an accurate quote, could you share any detailed API specifications or design guidelines you have? I'd also love to schedule a brief 15-minute introductory call next Tuesday to align on key details. Please let me know your availability.\n\nBest regards,\nSales & Account Team\nAI Email Automation"
+    },
+    {
+        "sender": "emma.watson@talentpartners.io",
+        "subject": "Interview Invitation: Lead AI Engineer Position",
+        "body": "Hi,\n\nI was very impressed by your profile and experience in building full-stack AI automation workflows. Our hiring committee would love to invite you for a 45-minute technical conversation this Friday at 3:00 PM EST.\n\nPlease confirm if this time slot works for you or suggest an alternative that fits your calendar.\n\nWarm regards,\nEmma Watson\nSenior Technical Recruiter",
+        "priority": "High",
+        "category": "important",
+        "intent": "Interview scheduling & career opportunity discussion",
+        "summary": "Emma Watson from Talent Partners invited you to a 45-minute technical interview for Lead AI Engineer this Friday at 3:00 PM EST.",
+        "requires_approval": 1,
+        "action_items": [
+            "Confirm Friday 3:00 PM EST interview availability.",
+            "Review portfolio and system architecture materials.",
+            "Send updated resume copy."
+        ],
+        "draft_reply": "Subject: Re: Interview Invitation: Lead AI Engineer Position\n\nHi Emma,\n\nThank you for reaching out! I would be thrilled to speak with the hiring committee. Friday at 3:00 PM EST works perfectly for me.\n\nLooking forward to our conversation.\n\nBest regards"
+    },
+    {
+        "sender": "david.miller@devcraft.org",
+        "subject": "Quick question regarding API Integration milestone",
+        "body": "Hey there,\n\nHope you're having a productive week! Just checking in to see if we can sync on the OAuth 2.0 and IMAP webhook integration endpoints tomorrow morning. Let me know what time works best for a quick 10-minute huddle.\n\nCheers,\nDavid Miller\nLead Software Architect",
+        "priority": "Medium",
+        "category": "important",
+        "intent": "Project collaboration & technical sync check-in",
+        "summary": "David Miller asked for a 10-minute sync tomorrow morning regarding OAuth 2.0 and IMAP webhook integration endpoints.",
+        "requires_approval": 1,
+        "action_items": [
+            "Check calendar for tomorrow morning opening.",
+            "Prepare quick status update on IMAP webhook endpoints."
+        ],
+        "draft_reply": "Subject: Re: Quick question regarding API Integration milestone\n\nHi David,\n\nTomorrow morning works great. How does 10:30 AM sound? I will send over a calendar invite with the meeting link.\n\nBest,\nTeam"
     },
     {
         "sender": "monitoring@cloudalert.net",
@@ -92,21 +134,6 @@ MOCK_EMAILS = [
         "requires_approval": 0,
         "action_items": [],
         "draft_reply": ""
-    },
-    {
-        "sender": "hr@company.internal",
-        "subject": "Team Meeting Tomorrow at 10 AM",
-        "body": "Hi everyone,\n\nJust a reminder that we have our weekly team sync tomorrow at 10 AM in the main conference room. Please come prepared with your weekly updates.\n\nThanks,\nHR Team",
-        "priority": "Medium",
-        "category": "important",
-        "intent": "Meeting reminder requiring attendance preparation",
-        "summary": "Weekly team sync scheduled for tomorrow at 10 AM. Attendees should prepare weekly updates.",
-        "requires_approval": 1,
-        "action_items": [
-            "Prepare weekly status update.",
-            "Block calendar for 10 AM meeting."
-        ],
-        "draft_reply": "Subject: Re: Team Meeting Tomorrow at 10 AM\n\nHi HR Team,\n\nThank you for the reminder. I'll be there with my weekly updates ready.\n\nBest regards"
     }
 ]
 
@@ -177,12 +204,18 @@ def generate_with_gemini(api_key, sender, subject, body):
 
     prompt = f"""You are an intelligent email assistant. Analyze this email and return a JSON response with these fields:
 - "priority": "High", "Medium", or "Low"
-- "category": classify as one of: "important", "spam", "newsletter", "promotion"
-- "intent": A brief phrase describing the sender's intent (e.g., "Request for quote", "Alert notification", "Marketing newsletter")
-- "summary": A 2-3 sentence summary
+- "category": classify as one of: "important", "spam", "newsletter", "promotion" (Company, internship, interview, meeting, invitation, and business client emails MUST be classified as "important")
+- "intent": A brief phrase describing the sender's intent (e.g., "Interview Invitation", "Internship Opportunity", "Meeting Request", "Company Offer", "Quote Request", "Newsletter")
+- "summary": A 2-3 sentence clear summary
 - "action_items": An array of action item strings (empty array if none)
-- "draft_reply": A professional reply draft (always generate a polite response, even for newsletters, spam, promotions, or blank/test emails, so the user can test the draft system)
-- "requires_approval": true or false. Set to true if the email mentions scheduling a meeting, a call, an appointment, a calendar proposal, or specifies any timeline/date/time to meet (e.g., "let's meet", "are you free at 3pm", "appointment", "schedule a call", "timeline for the project sync", etc.), requiring manual coordination or acceptance from the user. Otherwise, set it to false.
+- "draft_reply": A professional, polite, and context-aware reply draft (or empty string if no reply needed)
+- "requires_approval": true or false. Set to true if the email is an important communication requiring user review/approval before sending, specifically:
+  1. Company, corporate, or official business emails
+  2. Internship opportunities, job offers, or career inquiries
+  3. Interview invitations or scheduling requests
+  4. Meetings, appointments, calls, calendar invites, or date/time coordination
+  5. Event invitations or client contract proposals
+  Set to false only for generic promotional ads, routine automated newsletters, or low-priority alerts that do not need personal user approval.
 
 Email:
 From: {sender}
@@ -209,7 +242,7 @@ Body:
             else:
                 print(f"[Gemini API] Analyzing email from {sender}...")
 
-            with urllib.request.urlopen(req) as response:
+            with urllib.request.urlopen(req, timeout=8) as response:
                 res_data = json.loads(response.read().decode('utf-8'))
                 text = res_data['candidates'][0]['content']['parts'][0]['text'].strip()
                 if text.startswith('```json'):
@@ -232,11 +265,87 @@ Body:
                 time.sleep(sleep_time)
             else:
                 return None
-        except Exception as e:
-            print(f"[Gemini API Error] {e}")
-            return None
-
     return None
+
+def heuristic_fallback(sender, subject, body):
+    """Robust local heuristic classifier used if Gemini API is unreachable or rate-limited."""
+    sender_l = (sender or "").lower()
+    subj_l = (subject or "").lower()
+    body_l = (body or "").lower()
+    combined = f"{sender_l} {subj_l} {body_l}"
+
+    # Priority & Category Heuristics
+    if any(k in combined for k in ["interview", "job", "hiring", "offer", "candidate", "internship", "career"]):
+        category = "important"
+        priority = "High"
+        intent = "Career & Interview Opportunity"
+        requires_approval = True
+    elif any(k in combined for k in ["meeting", "schedule", "call", "urgent", "invoice", "payment", "quote", "client", "proposal"]):
+        category = "important"
+        priority = "High"
+        intent = "Business Coordination"
+        requires_approval = True
+    elif any(k in combined for k in ["deal", "discount", "sale", "promo", "coupon", "offer"]):
+        category = "promotion"
+        priority = "Low"
+        intent = "Promotional Offer"
+        requires_approval = False
+    elif any(k in combined for k in ["newsletter", "weekly", "digest", "update", "roundup", "edition"]):
+        category = "newsletter"
+        priority = "Low"
+        intent = "Newsletter Update"
+        requires_approval = False
+    elif any(k in combined for k in ["spam", "lottery", "winner", "prize", "crypto"]):
+        category = "spam"
+        priority = "Low"
+        intent = "Unsolicited Message"
+        requires_approval = False
+    else:
+        category = "important"
+        priority = "Medium"
+        intent = "General Communication"
+        requires_approval = True
+
+    # Clean summary
+    clean_body = re.sub(r'\s+', ' ', body).strip()
+    if clean_body and clean_body != "Empty body.":
+        summary = clean_body[:200] + ("..." if len(clean_body) > 200 else "")
+    else:
+        summary = f"Direct email from {sender} with subject '{subject}'."
+
+    # Action items
+    action_items = []
+    if "interview" in combined or "job" in combined:
+        action_items.append("Review interview schedule and confirm availability")
+        action_items.append("Prepare required portfolio / resume documents")
+    elif "meeting" in combined:
+        action_items.append("Check calendar and confirm meeting time slot")
+    elif "invoice" in combined or "payment" in combined:
+        action_items.append("Verify payment terms and billing invoice")
+    elif category == "important":
+        action_items.append("Follow up with sender regarding message")
+
+    # Smart Draft reply
+    if category == "important":
+        name_part = sender.split("@")[0].replace(".", " ").replace("_", " ").title()
+        draft_reply = (
+            f"Hi {name_part},\n\n"
+            f"Thank you for reaching out regarding \"{subject}\". I have received your message and will review the details and get back to you shortly.\n\n"
+            f"Best regards,\n[Your Name]"
+        )
+    else:
+        draft_reply = ""
+
+    return {
+        "priority": priority,
+        "category": category,
+        "intent": intent,
+        "summary": summary,
+        "action_items": action_items,
+        "draft_reply": draft_reply,
+        "requires_approval": requires_approval
+    }
+
 
 # ── Excel Logging ────────────────────────────────────────────────────────────
 
@@ -257,23 +366,30 @@ def initialize_excel():
             print(f"[Error] Excel init failed: {e}")
 
 def log_to_excel(email_id, sender, subject, priority, category, intent, status):
-    if not EXCEL_AVAILABLE or not os.path.exists(EXCEL_FILE):
+    if not EXCEL_AVAILABLE:
         return
     try:
-        wb = openpyxl.load_workbook(EXCEL_FILE)
-        ws = wb.active
+        try:
+            wb = openpyxl.load_workbook(EXCEL_FILE)
+            ws = wb.active
+        except Exception:
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Email Logs"
+            ws.append(["Timestamp", "Email ID", "Sender", "Subject", "Priority", "Category", "Intent", "Status"])
         ws.append([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), email_id, sender, subject, priority, category, intent, status])
         wb.save(EXCEL_FILE)
         print(f"[Excel] Logged email {email_id}")
     except Exception as e:
         print(f"[Excel Error] {e}")
 
-def get_existing_email_id(sender, subject, body):
+
+def get_existing_email_id(sender, subject, body, user_id=1):
     try:
-        conn = sqlite3.connect(DB_FILE)
+        conn = sqlite3.connect(DB_FILE, timeout=10.0)
         c = conn.cursor()
         body_snippet = body[:100] if body else ""
-        c.execute("SELECT id FROM emails WHERE sender = ? AND subject = ? AND body LIKE ?", (sender, subject, body_snippet + '%'))
+        c.execute("SELECT id FROM emails WHERE user_id = ? AND sender = ? AND subject = ? AND body LIKE ?", (user_id, sender, subject, body_snippet + '%'))
         row = c.fetchone()
         conn.close()
         return row[0] if row else None
@@ -285,7 +401,7 @@ def get_existing_email_id(sender, subject, body):
 
 def insert_email_to_db(email, user_id=1, imap_account_id=None):
     try:
-        conn = sqlite3.connect(DB_FILE)
+        conn = sqlite3.connect(DB_FILE, timeout=10.0)
         c = conn.cursor()
         
         # Ensure column exists
@@ -302,13 +418,35 @@ def insert_email_to_db(email, user_id=1, imap_account_id=None):
             
         received_at = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         
-        requires_approval = email.get("requires_approval", 0)
+        # Check auto-reply policy rules
+        db_settings = load_db_settings()
+        master_auto_reply = db_settings.get("rule_master_autoreply", "true").lower() != "false"
+        delay_mins_str = db_settings.get("rule_delay_mins", "20")
+        try:
+            delay_mins = int(delay_mins_str)
+        except ValueError:
+            delay_mins = 20
+
+        category = (email.get("category") or "important").lower()
         
-        # If it requires approval (e.g. contains scheduling/timeline), do not set auto-send timer
-        if requires_approval:
+        # Check category-specific permission (default: Important=ON, Promo/Newsletter/Spam=OFF)
+        category_allowed = True
+        if category == "important":
+            category_allowed = db_settings.get("rule_reply_important", "true").lower() != "false"
+        elif category == "promotion":
+            category_allowed = db_settings.get("rule_reply_promotion", "false").lower() == "true"
+        elif category == "newsletter":
+            category_allowed = db_settings.get("rule_reply_newsletter", "false").lower() == "true"
+        elif category == "spam":
+            category_allowed = db_settings.get("rule_reply_spam", "false").lower() == "true"
+            
+        requires_approval = email.get("requires_approval", 0)
+
+        # Set auto-send schedule timer if allowed
+        if not master_auto_reply or not category_allowed or requires_approval or delay_mins <= 0 or not email.get("draft_reply"):
             send_at = None
         else:
-            send_at = (datetime.now(timezone.utc) + timedelta(minutes=20)).isoformat().replace('+00:00', 'Z') if email.get("draft_reply") else None
+            send_at = (datetime.now(timezone.utc) + timedelta(minutes=delay_mins)).isoformat().replace('+00:00', 'Z')
             
         action_items_str = json.dumps(email.get("action_items", []))
 
@@ -353,20 +491,58 @@ def insert_email_to_db(email, user_id=1, imap_account_id=None):
 
 # ── Simulation Mode ──────────────────────────────────────────────────────────
 
-def run_simulation():
-    print("\n--- Running AI Email Agent Simulation ---")
+def run_simulation(user_id=1):
+    print(f"\n--- Running AI Email Agent Simulation for User ID {user_id} ---")
     initialize_excel()
+    inserted_count = 0
     for mock in MOCK_EMAILS:
-        print(f"\n[Ingesting] Email from: {mock['sender']} [{mock['category']}]")
-        time.sleep(0.5)
-        eid = insert_email_to_db(mock)
+        existing = get_existing_email_id(mock["sender"], mock["subject"], mock.get("body", ""), user_id)
+        if existing:
+            print(f"[Skip] Mock email '{mock['subject']}' already exists for user {user_id} (ID: {existing})")
+            continue
+        print(f"\n[Ingesting] Email from: {mock['sender']} [{mock['category']}] for user {user_id}")
+        time.sleep(0.3)
+        eid = insert_email_to_db(mock, user_id=user_id)
         if eid:
+            inserted_count += 1
             log_to_excel(eid, mock["sender"], mock["subject"], mock["priority"], mock.get("category", ""), mock.get("intent", ""), "Pending")
-    print("\n[OK] Simulation complete. Emails ready on dashboard.")
+    print(f"\n[OK] Simulation complete. {inserted_count} new emails ingested for user {user_id}.")
+
+
+# ── Google OAuth Token Refresh ───────────────────────────────────────────────
+
+GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
+
+def refresh_google_access_token(refresh_token):
+    """Exchange a refresh token for a fresh access token."""
+    try:
+        data = urllib.parse.urlencode({
+            'client_id': GOOGLE_CLIENT_ID,
+            'client_secret': GOOGLE_CLIENT_SECRET,
+            'refresh_token': refresh_token,
+            'grant_type': 'refresh_token'
+        }).encode('utf-8')
+        
+        req = urllib.request.Request('https://oauth2.googleapis.com/token', data=data, method='POST')
+        req.add_header('Content-Type', 'application/x-www-form-urlencoded')
+        
+        with urllib.request.urlopen(req, timeout=15) as response:
+            result = json.loads(response.read().decode('utf-8'))
+            access_token = result.get('access_token')
+            if access_token:
+                print(f"[OAuth] Successfully refreshed access token")
+                return access_token
+            else:
+                print(f"[OAuth Error] No access_token in response: {result}")
+                return None
+    except Exception as e:
+        print(f"[OAuth Error] Failed to refresh token: {e}")
+        return None
 
 # ── Real IMAP Agent ──────────────────────────────────────────────────────────
 
-def run_real_agent(imap_server, imap_user, imap_pass, llm_api_key, user_id=1, imap_account_id=None):
+def run_real_agent(imap_server, imap_user, imap_pass, llm_api_key, user_id=1, imap_account_id=None, auth_type='password', oauth_refresh_token=None):
     if not IMAP_AVAILABLE:
         print("[Error] imapclient not installed. Run: pip install imapclient")
         return
@@ -374,23 +550,54 @@ def run_real_agent(imap_server, imap_user, imap_pass, llm_api_key, user_id=1, im
         print("[Error] Valid GEMINI_API_KEY required. Check settings page or .env.")
         return
 
-    print(f"\n--- Starting AI Email Agent for {imap_user} ({imap_server}) ---")
+    print(f"\n--- Starting AI Email Agent for {imap_user} ({imap_server}) [auth: {auth_type}] ---")
     initialize_excel()
 
     try:
         print(f"[IMAP] Connecting to {imap_server}...")
         with IMAPClient(imap_server, ssl=True) as client:
-            client.login(imap_user, imap_pass)
-            print(f"[IMAP] Login successful for {imap_user}!")
+            if auth_type == 'oauth' and oauth_refresh_token:
+                # Get fresh access token using refresh token
+                access_token = refresh_google_access_token(oauth_refresh_token)
+                if not access_token:
+                    print(f"[Error] Failed to refresh OAuth access token for {imap_user}")
+                    return
+                # Authenticate with XOAUTH2
+                oauth2_string = f"user={imap_user}\x01auth=Bearer {access_token}\x01\x01"
+                client.oauth2_login(imap_user, access_token)
+                print(f"[IMAP] OAuth2 login successful for {imap_user}!")
+            else:
+                client.login(imap_user, imap_pass)
+                print(f"[IMAP] Login successful for {imap_user}!")
             client.select_folder('INBOX')
 
+            # Strategy: Check UNSEEN first, then also grab today's emails (SINCE today)
+            # This ensures emails read on mobile (marked Seen) are still captured.
+            from datetime import date as _date
+            today_str = _date.today().strftime('%d-%b-%Y')
+
             unseen_messages = client.search('UNSEEN')
-            all_messages = client.search('ALL')
-            recent_all = all_messages[-10:] if len(all_messages) > 10 else all_messages
-            
-            # Combine unseen and recent messages, keeping order (unseen first) and avoiding duplicates
-            messages = list(dict.fromkeys(unseen_messages + recent_all))
-            print(f"[IMAP] Found {len(unseen_messages)} unread and {len(recent_all)} recent messages. Total to sync: {len(messages)}")
+            today_messages = client.search(['SINCE', today_str])
+
+            # Combine both lists (unique message IDs)
+            combined = list(set(list(unseen_messages) + list(today_messages)))
+            # Sort so newest IDs (highest number) are last, take last 15 max
+            combined.sort()
+            if len(combined) > 15:
+                combined = combined[-15:]
+
+            if combined:
+                messages = combined
+                print(f"[IMAP] Found {len(messages)} messages to process (UNSEEN: {len(unseen_messages)}, Today: {len(today_messages)}).")
+            else:
+                # Final fallback: last 10 recent messages if inbox is empty today
+                all_msgs = client.search('ALL')
+                if len(all_msgs) > 10:
+                    all_msgs = all_msgs[-10:]
+                messages = all_msgs
+                print(f"[IMAP] No new messages today. Ingesting latest {len(messages)} recent messages from Inbox...")
+
+
 
             for msg_id in messages:
                 response = client.fetch(msg_id, ['ENVELOPE', 'RFC822'])
@@ -408,7 +615,20 @@ def run_real_agent(imap_server, imap_user, imap_pass, llm_api_key, user_id=1, im
                 # Parse subject
                 subject = "No Subject"
                 if envelope.subject:
-                    subject = envelope.subject.decode('utf-8', errors='ignore')
+                    raw_subj = envelope.subject.decode('utf-8', errors='ignore')
+                    try:
+                        from email.header import decode_header
+                        decoded_parts = decode_header(raw_subj)
+                        decoded_str = ""
+                        for part, charset in decoded_parts:
+                            if isinstance(part, bytes):
+                                decoded_str += part.decode(charset or 'utf-8', errors='ignore')
+                            else:
+                                decoded_str += str(part)
+                        subject = decoded_str.strip() or raw_subj
+                    except Exception:
+                        subject = raw_subj
+
 
                 # Parse body robustly using email library
                 raw_bytes = data.get(b'RFC822', b'')
@@ -435,39 +655,42 @@ def run_real_agent(imap_server, imap_user, imap_pass, llm_api_key, user_id=1, im
                 if not body.strip():
                     body = "Empty body."
 
-                # Check if this email already exists in our database
-                existing_id = get_existing_email_id(sender_addr, subject, body)
+                # Check if this email already exists in our database for this specific user
+                existing_id = get_existing_email_id(sender_addr, subject, body, user_id)
                 if existing_id:
-                    print(f"\n[Skip] Email from {sender_addr}: '{subject}' already processed (ID: {existing_id})")
+                    print(f"\n[Skip] Email from {sender_addr}: '{subject}' already processed for user {user_id} (ID: {existing_id})")
                     if msg_id in unseen_messages:
                         client.add_flags(msg_id, '\\Seen')
                         print(f"[IMAP] Marked unseen email {msg_id} as Read.")
                     continue
 
-                print(f"\n[Processing] {sender_addr}: {subject}")
+                insights = None
+                if llm_api_key:
+                    insights = generate_with_gemini(llm_api_key, sender_addr, subject, body)
+                
+                if not insights:
+                    print(f"[Fallback] Using local intelligent email classifier for '{subject}'")
+                    insights = heuristic_fallback(sender_addr, subject, body)
 
-                insights = generate_with_gemini(llm_api_key, sender_addr, subject, body)
-
-                if insights:
-                    processed = {
-                        "sender": sender_addr,
-                        "subject": subject,
-                        "body": body[:4000],
-                        "priority": insights.get("priority", "Medium"),
-                        "category": insights.get("category", "important"),
-                        "intent": insights.get("intent", ""),
-                        "summary": insights.get("summary", ""),
-                        "action_items": insights.get("action_items", []),
-                        "draft_reply": insights.get("draft_reply", ""),
-                        "requires_approval": 1 if insights.get("requires_approval") else 0
-                    }
-                    eid = insert_email_to_db(processed, user_id, imap_account_id)
-                    if eid:
-                        log_to_excel(eid, sender_addr, subject, processed["priority"], processed["category"], processed["intent"], "Pending")
+                processed = {
+                    "sender": sender_addr,
+                    "subject": subject,
+                    "body": body[:4000],
+                    "priority": insights.get("priority", "Medium"),
+                    "category": insights.get("category", "important"),
+                    "intent": insights.get("intent", ""),
+                    "summary": insights.get("summary", ""),
+                    "action_items": insights.get("action_items", []),
+                    "draft_reply": insights.get("draft_reply", ""),
+                    "requires_approval": 1 if insights.get("requires_approval") else 0
+                }
+                eid = insert_email_to_db(processed, user_id, imap_account_id)
+                if eid:
+                    log_to_excel(eid, sender_addr, subject, processed["priority"], processed["category"], processed["intent"], "Pending")
+                    if msg_id in unseen_messages:
                         client.add_flags(msg_id, '\\Seen')
                         print(f"[IMAP] Marked email {msg_id} as Read.")
-                else:
-                    print(f"[Error] AI analysis failed for email {msg_id}")
+
 
                 time.sleep(1.0)
 
@@ -502,12 +725,14 @@ def main():
     parser = argparse.ArgumentParser(description="AI Email Automation Background Agent")
     parser.add_argument('--simulate', action='store_true', help="Run simulation with mock emails once and exit")
     parser.add_argument('--loop', action='store_true', help="Run in a continuous 30-second loop")
+    parser.add_argument('--user-id', type=int, default=None, help="Target specific user ID")
     args = parser.parse_args()
 
     load_env()
+    target_user_id = args.user_id or 1
 
     if args.simulate:
-        run_simulation()
+        run_simulation(user_id=target_user_id)
         return
 
     # Helper function to perform a single sync cycle
@@ -530,25 +755,60 @@ def main():
                 c = conn.cursor()
                 c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='imap_accounts'")
                 if c.fetchone():
-                    c.execute("SELECT id, user_id, email, imap_server, imap_user, imap_password FROM imap_accounts")
+                    # Check if columns exist
+                    c.execute("PRAGMA table_info(imap_accounts)")
+                    cols = [col[1] for col in c.fetchall()]
+                    has_oauth = 'auth_type' in cols and 'oauth_refresh_token' in cols
+                    
+                    query = "SELECT id, user_id, email, imap_server, imap_user, imap_password"
+                    if has_oauth:
+                        query += ", auth_type, oauth_refresh_token"
+                    query += " FROM imap_accounts"
+                    if args.user_id:
+                        query += f" WHERE user_id = {int(args.user_id)}"
+                    
+                    c.execute(query)
                     for row in c.fetchall():
-                        acc_id, u_id, u_email, u_server, u_user, u_pass = row
-                        u_pass_decrypted = decrypt_password(u_pass) if u_pass else ""
-                        if u_server and u_user and u_pass_decrypted:
-                            users_to_process.append({
-                                "id": u_id,
-                                "account_id": acc_id,
-                                "email": u_email,
-                                "imap_server": u_server,
-                                "imap_user": u_user,
-                                "imap_password": u_pass_decrypted
-                            })
+                        if has_oauth:
+                            acc_id, u_id, u_email, u_server, u_user, u_pass, auth_type, oauth_token = row
+                            auth_type = auth_type or 'password'
+                        else:
+                            acc_id, u_id, u_email, u_server, u_user, u_pass = row
+                            auth_type = 'password'
+                            oauth_token = None
+
+                        if auth_type == 'oauth':
+                            oauth_decrypted = decrypt_password(oauth_token) if oauth_token else ""
+                            if u_server and u_user and oauth_decrypted:
+                                users_to_process.append({
+                                    "id": u_id,
+                                    "account_id": acc_id,
+                                    "email": u_email,
+                                    "imap_server": u_server or "imap.gmail.com",
+                                    "imap_user": u_user,
+                                    "imap_password": "",
+                                    "auth_type": "oauth",
+                                    "oauth_refresh_token": oauth_decrypted
+                                })
+                        else:
+                            u_pass_decrypted = decrypt_password(u_pass) if u_pass else ""
+                            if u_server and u_user and u_pass_decrypted:
+                                users_to_process.append({
+                                    "id": u_id,
+                                    "account_id": acc_id,
+                                    "email": u_email,
+                                    "imap_server": u_server,
+                                    "imap_user": u_user,
+                                    "imap_password": u_pass_decrypted,
+                                    "auth_type": "password",
+                                    "oauth_refresh_token": None
+                                })
                 conn.close()
             except Exception as e:
                 print(f"[DB Error fetching IMAP accounts] {e}")
 
         # Fallback to global setting if no users in DB have IMAP configured
-        if not users_to_process:
+        if not users_to_process and not args.user_id:
             g_server = db_settings.get("imap_server") or os.environ.get("IMAP_SERVER")
             g_user = db_settings.get("imap_user") or os.environ.get("IMAP_USER")
             g_pass_enc = db_settings.get("imap_password") or os.environ.get("IMAP_PASSWORD")
@@ -560,18 +820,30 @@ def main():
                     "email": g_user,
                     "imap_server": g_server,
                     "imap_user": g_user,
-                    "imap_password": g_pass
+                    "imap_password": g_pass,
+                    "auth_type": "password",
+                    "oauth_refresh_token": None
                 })
 
         if not users_to_process:
-            print("[Info] No active IMAP credentials found. Please configure settings on the dashboard.")
+            print(f"[Info] No active IMAP credentials found for user filter ({args.user_id or 'all'}). Running simulation ingestion...")
+            run_simulation(user_id=target_user_id)
         else:
             if not llm_api_key or llm_api_key == "your_gemini_api_key_here":
                 print("[Warn] GEMINI_API_KEY is not set. Cannot process real emails without Gemini LLM Key.")
             else:
                 # Sync for each user
                 for user in users_to_process:
-                    run_real_agent(user["imap_server"], user["imap_user"], user["imap_password"], llm_api_key, user["id"], user["account_id"])
+                    run_real_agent(
+                        user["imap_server"],
+                        user["imap_user"],
+                        user["imap_password"],
+                        llm_api_key,
+                        user["id"],
+                        user["account_id"],
+                        user.get("auth_type", "password"),
+                        user.get("oauth_refresh_token")
+                    )
 
     if args.loop:
         print("AI Email Automation Background Agent started. Sync loop running every 30s...")
@@ -582,8 +854,9 @@ def main():
                 print(f"[Agent Loop Error] {e}")
             time.sleep(30)
     else:
-        print("AI Email Automation Agent: running single sync cycle...")
+        print("AI Email Automation Agent: running sync cycle...")
         do_sync_cycle()
 
 if __name__ == "__main__":
     main()
+

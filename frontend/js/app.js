@@ -16,12 +16,49 @@ let allImapAccounts = [];
 let currentFilter = 'all'; // category filter
 let currentPriorityFilter = 'all'; // 'all', 'High', 'Medium', 'Low', 'grouped'
 let currentSearchQuery = '';
+
 let currentModalEmail = null;
 let editingEmailId = null;
 let countdownIntervals = [];
+let lastSyncTimestamp = null;
+let previousTotalEmailCount = -1;
+let isLiveSyncActive = false;
+let isLiveConnected = true; // Assumed connected until first health check
+
+// ── Theme Engine (Bright / Dark Mode) ───────────────────────────────────────
+function initTheme() {
+  const savedTheme = localStorage.getItem('app_theme') || 'dark';
+  if (savedTheme === 'light') {
+    document.body.classList.add('light-mode');
+  } else {
+    document.body.classList.remove('light-mode');
+  }
+  updateThemeUI();
+}
+
+function toggleTheme() {
+  const isLight = document.body.classList.toggle('light-mode');
+  localStorage.setItem('app_theme', isLight ? 'light' : 'dark');
+  updateThemeUI();
+  showToast(isLight ? '☀️ Bright Mode Enabled' : '🌙 Dark Mode Enabled', 'info');
+}
+
+function updateThemeUI() {
+  const isLight = document.body.classList.contains('light-mode');
+  const icon = document.getElementById('themeIcon');
+  const label = document.getElementById('themeLabel');
+  const row = document.getElementById('sidebarThemeBtn');
+  if (icon) icon.textContent = isLight ? '🌙' : '☀️';
+  if (label) label.textContent = isLight ? 'Dark Mode' : 'Bright Mode';
+  if (row) row.title = isLight ? 'Switch to Dark Mode' : 'Switch to Bright Mode';
+}
+
 
 // ── Init ────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  // Initialize Bright/Dark theme
+  initTheme();
+
   // Set user info in sidebar
   document.getElementById('userName').textContent = USER_EMAIL;
   document.getElementById('userRole').textContent = USER_ROLE === 'admin' ? 'Administrator' : 'User';
@@ -36,9 +73,131 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load initial data
   refreshData();
 
-  // Auto-refresh every 30 seconds
-  setInterval(refreshData, 30000);
+  // Start Lively Real-time Background Monitoring (Checks every 15s)
+  startLiveMonitoring();
 });
+
+
+// ── Live Monitoring Engine ──────────────────────────────────────────────────
+function startLiveMonitoring() {
+  // Initial check
+  checkMonitoringHealth();
+
+  // Poll monitoring status and new emails every 30 seconds
+  setInterval(async () => {
+    await checkMonitoringHealth();
+  }, 30000);
+
+  // Update time-ago ticker every 5 seconds
+  setInterval(updateLiveTicker, 5000);
+}
+
+async function checkMonitoringHealth() {
+  try {
+    const res = await fetch('/api/monitoring/status', { headers: AUTH_HEADERS });
+    const data = await res.json();
+    if (data.success) {
+      isLiveSyncActive = data.isSyncing;
+      // Use isConnected from server — true only if accounts exist + sync < 3 min ago
+      isLiveConnected = data.isConnected !== undefined ? data.isConnected : (data.accountsCount > 0);
+      if (data.lastSyncTimestamp) {
+        lastSyncTimestamp = new Date(data.lastSyncTimestamp);
+      }
+      updateLiveBadgeUI();
+    }
+    // Refresh emails quietly in the background
+    await loadEmails(true);
+  } catch (err) {
+    console.error('Monitoring health check error:', err);
+  }
+}
+
+function updateLiveTicker() {
+  const timeSub = document.getElementById('liveTimeSub');
+  if (!timeSub) return;
+  if (isLiveSyncActive) {
+    timeSub.textContent = 'Syncing...';
+    return;
+  }
+  if (!lastSyncTimestamp) {
+    timeSub.textContent = 'Every 60s';
+    return;
+  }
+  const diffSec = Math.floor((Date.now() - lastSyncTimestamp.getTime()) / 1000);
+  if (diffSec < 10) {
+    timeSub.textContent = 'Just synced';
+  } else if (diffSec < 60) {
+    timeSub.textContent = `${diffSec}s ago`;
+  } else {
+    const mins = Math.floor(diffSec / 60);
+    timeSub.textContent = mins > 2 ? `⚠️ ${mins}m ago` : `${mins}m ago`;
+  }
+}
+
+function updateLiveBadgeUI() {
+  const badge = document.getElementById('liveStatusBadge');
+  const dot = document.getElementById('liveDot');
+  const text = document.getElementById('liveStatusText');
+  if (!badge || !dot || !text) return;
+
+  if (isLiveSyncActive) {
+    badge.style.borderColor = 'rgba(245,158,11,0.4)';
+    dot.className = 'live-pulse-dot pulsing-amber';
+    text.textContent = 'Syncing Inbox...';
+  } else if (!isLiveConnected) {
+    // No accounts connected or sync stale
+    badge.style.borderColor = 'rgba(239,68,68,0.4)';
+    dot.className = 'live-pulse-dot pulsing-red';
+    text.textContent = 'Not Connected';
+  } else {
+    badge.style.borderColor = '';
+    dot.className = 'live-pulse-dot pulsing-green';
+    text.textContent = 'Live Monitor Active';
+  }
+  updateLiveTicker();
+}
+
+async function triggerLiveCheck() {
+  const syncBtn = document.getElementById('btnRunSync');
+  const syncIcon = document.getElementById('syncIcon');
+  if (syncIcon) syncIcon.style.animation = 'spin 1s linear infinite';
+  
+  showToast('🔄 Running live inbox sync...');
+  isLiveSyncActive = true;
+  updateLiveBadgeUI();
+
+  try {
+    const res = await fetch('/api/run-agent', { method: 'POST', headers: AUTH_HEADERS });
+    const data = await res.json();
+    if (data.success) {
+      showToast('✓ ' + data.message, 'success');
+      await refreshData();
+    } else {
+      showToast('✕ ' + data.message, 'error');
+    }
+  } catch (err) {
+    showToast('✕ Sync error: ' + err.message, 'error');
+  } finally {
+    isLiveSyncActive = false;
+    lastSyncTimestamp = new Date();
+    updateLiveBadgeUI();
+    if (syncIcon) syncIcon.style.animation = '';
+  }
+}
+
+// Simple Toast Notification helper
+function showToast(message, type = 'info') {
+  const existing = document.getElementById('appGlobalToast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'appGlobalToast';
+  const bg = type === 'success' ? '#059669' : type === 'error' ? '#dc2626' : '#4f46e5';
+  toast.style.cssText = `position:fixed;top:20px;left:50%;transform:translateX(-50%);background:${bg};color:white;padding:10px 20px;border-radius:8px;font-size:0.88rem;font-weight:500;z-index:10000;box-shadow:0 6px 20px rgba(0,0,0,0.35);animation:fadeIn 0.25s ease;display:flex;align-items:center;gap:8px;`;
+  toast.innerHTML = message;
+  document.body.appendChild(toast);
+  setTimeout(() => { if (toast.parentNode) toast.remove(); }, 4000);
+}
 
 // ── Tab Navigation ──────────────────────────────────────────────────────────
 function switchTab(tab) {
@@ -82,12 +241,18 @@ async function checkOnboarding() {
     const accData = await accRes.json();
     if (accData.success) {
       allImapAccounts = accData.accounts;
-      if (allImapAccounts.length === 0) {
-        document.getElementById('onboardingOverlay').style.display = 'flex';
-        isOnboardingActive = true;
-        return true;
+      
+      const currentUserId = parseInt(USER_ID, 10);
+      const myAccounts = allImapAccounts.filter(acc => !acc.user_id || acc.user_id === currentUserId);
+      
+      const prompt = document.getElementById('addMailboxPrompt');
+      
+      if (myAccounts.length === 0) {
+        if (prompt) prompt.style.display = 'block';
+        isOnboardingActive = false;
+        return false;
       } else {
-        document.getElementById('onboardingOverlay').style.display = 'none';
+        if (prompt) prompt.style.display = 'none';
         isOnboardingActive = false;
         return false;
       }
@@ -97,6 +262,38 @@ async function checkOnboarding() {
   }
   return false;
 }
+
+// ── Google OAuth Connect ──────────────────────────────────────────────────
+function connectWithGoogle() {
+  const userId = USER_ID || '';
+  const token = SESSION_TOKEN || '';
+  window.location.href = `/auth/google?token=${encodeURIComponent(token)}&userId=${encodeURIComponent(userId)}`;
+}
+
+// Handle OAuth redirect results
+(function handleOAuthResult() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('oauth_success') === 'true') {
+    // Clean URL
+    window.history.replaceState({}, '', '/dashboard.html');
+    setTimeout(() => {
+      showToast('✓ Google account connected successfully!', 'success');
+    }, 500);
+  } else if (params.get('oauth_error')) {
+    window.history.replaceState({}, '', '/dashboard.html');
+    const errorMap = {
+      'no_code': 'Google authorization was cancelled.',
+      'session_expired': 'Your session expired. Please log in again.',
+      'token_failed': 'Failed to exchange Google token. Please try again.',
+      'no_email': 'Could not retrieve email from Google.',
+      'server_error': 'Server error during OAuth. Please try again.'
+    };
+    const errMsg = errorMap[params.get('oauth_error')] || 'OAuth connection failed.';
+    setTimeout(() => {
+      showToast('✕ ' + errMsg, 'error');
+    }, 500);
+  }
+})();
 
 async function refreshData() {
   const onboarding = await checkOnboarding();
@@ -118,7 +315,7 @@ async function loadStats() {
   } catch (e) { console.error('Stats error:', e); }
 }
 
-async function loadEmails() {
+async function loadEmails(isSilentBackground = false) {
   try {
     // Fetch IMAP accounts list to display the target mailbox address
     const accRes = await fetch('/api/imap-accounts', { headers: AUTH_HEADERS });
@@ -130,7 +327,17 @@ async function loadEmails() {
     const res = await fetch('/api/emails', { headers: AUTH_HEADERS });
     const data = await res.json();
     if (data.success) {
+      const prevCount = allEmails.length;
       allEmails = data.emails;
+      
+      // If new emails arrived during live background monitoring, notify the user!
+      if (previousTotalEmailCount !== -1 && allEmails.length > previousTotalEmailCount && isSilentBackground) {
+        const diff = allEmails.length - previousTotalEmailCount;
+        const newest = allEmails[0];
+        showToast(`📬 ${diff} new email received from <strong>${escHtml(newest.sender)}</strong>!`, 'success');
+      }
+      previousTotalEmailCount = allEmails.length;
+
       renderMonitoring();
       renderDraftsList();
       renderSentLogs();
@@ -138,12 +345,89 @@ async function loadEmails() {
   } catch (e) { console.error('Emails error:', e); }
 }
 
+// ── Email Deletion & Quick Clean ────────────────────────────────────────────
+async function deleteEmail(id) {
+  if (!confirm('Are you sure you want to delete this email?')) return;
+  try {
+    const res = await fetch(`/api/emails/${id}`, { method: 'DELETE', headers: AUTH_HEADERS });
+    const data = await res.json();
+    if (data.success) {
+      showToast('✓ ' + data.message, 'success');
+      refreshData();
+    } else {
+      showToast('✕ ' + data.message, 'error');
+    }
+  } catch (e) {
+    showToast('✕ Error: ' + e.message, 'error');
+  }
+}
+
+async function quickCleanJunk() {
+  if (!confirm('Clean all spam, promotional clutter, delivery notification failures, and password reset loops?')) return;
+  try {
+    const res = await fetch('/api/emails/clean-junk', { method: 'POST', headers: AUTH_HEADERS });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`✓ ${data.message}`, 'success');
+      refreshData();
+    } else {
+      showToast('✕ ' + data.message, 'error');
+    }
+  } catch (e) {
+    showToast('✕ Error: ' + e.message, 'error');
+  }
+}
+
+// Helpers for initials and color
+function getInitials(nameOrEmail) {
+  if (!nameOrEmail) return '??';
+  let cleaned = nameOrEmail.split('@')[0].replace(/[._-]/g, ' ');
+  const parts = cleaned.trim().split(/\s+/);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+  return nameOrEmail.substring(0, 2).toUpperCase();
+}
+
+function getAvatarGradient(str) {
+  const gradients = [
+    'linear-gradient(135deg, #6366f1, #8b5cf6)',
+    'linear-gradient(135deg, #06b6d4, #3b82f6)',
+    'linear-gradient(135deg, #10b981, #059669)',
+    'linear-gradient(135deg, #f59e0b, #d97706)',
+    'linear-gradient(135deg, #ec4899, #8b5cf6)',
+    'linear-gradient(135deg, #3b82f6, #1d4ed8)'
+  ];
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  const index = Math.abs(hash) % gradients.length;
+  return gradients[index];
+}
+
+function formatRelativeTime(isoStr) {
+  try {
+    const d = new Date(isoStr);
+    const now = new Date();
+    const diffMs = now - d;
+    const diffSec = Math.floor(diffMs / 1000);
+    if (diffSec < 60) return 'Just now';
+    const diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return `${diffHr}h ago`;
+    return d.toLocaleDateString();
+  } catch {
+    return 'Recent';
+  }
+}
+
+
 // ── Monitoring Controller (Priority & Category Separation) ─────────────────
 function filterPriority(priority) {
   currentPriorityFilter = priority;
   
   // Update priority buttons active state
-  document.querySelectorAll('.priority-tab-btn').forEach(btn => {
+  document.querySelectorAll('[data-priority]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.priority === priority);
   });
   
@@ -160,7 +444,7 @@ function filterPriority(priority) {
 
 function filterEmails(category) {
   currentFilter = category;
-  document.querySelectorAll('.category-filter-group .filter-btn').forEach(btn => {
+  document.querySelectorAll('[data-filter]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.filter === category);
   });
   renderMonitoring();
@@ -211,9 +495,12 @@ function renderMonitoring() {
   const filterList = (list) => {
     return list.filter(e => {
       // Category filter
-      if (currentFilter !== 'all' && (e.category || '').toLowerCase() !== currentFilter.toLowerCase()) {
+      if (currentFilter === 'person') {
+        // person filter removed — fall through to all
+      } else if (currentFilter !== 'all' && (e.category || '').toLowerCase() !== currentFilter.toLowerCase()) {
         return false;
       }
+
       // Search filter
       if (currentSearchQuery) {
         const text = `${e.sender || ''} ${e.subject || ''} ${e.summary || ''} ${e.intent || ''} ${e.body || ''}`.toLowerCase();
@@ -299,13 +586,40 @@ function openMonitoringEmailModal(id) {
     approvalAlert.style.display = email.requires_approval ? 'block' : 'none';
   }
 
-  // Draft Reply
+  // Draft Reply & Auto-Send controls
   const draftBox = document.getElementById('monModalDraftReplyBox');
   const draftPre = document.getElementById('monModalDraftReply');
+  const statusEl = document.getElementById('monModalAutoReplyStatus');
+  const toggleBtn = document.getElementById('monModalToggleAutoSendBtn');
+  const editDraftBtn = document.getElementById('monModalEditDraftBtn');
+
   if (draftBox && draftPre) {
     if (email.draft_reply) {
       draftBox.style.display = 'block';
       draftPre.textContent = email.draft_reply;
+      
+      const isScheduled = email.send_at && new Date(email.send_at) > new Date() && !email.requires_approval;
+      if (statusEl) {
+        if (email.requires_approval) {
+          statusEl.innerHTML = '<span style="color:#f59e0b; font-weight:600;">⚠️ Paused (Requires Approval)</span>';
+        } else if (isScheduled) {
+          statusEl.innerHTML = '<span style="color:#10b981; font-weight:600;">⚡ Auto-Send Active</span>';
+        } else {
+          statusEl.innerHTML = '<span style="color:#94a3b8; font-weight:600;">⏸️ Auto-Send Off</span>';
+        }
+      }
+
+      if (toggleBtn) {
+        toggleBtn.textContent = isScheduled ? '⏸️ Pause Auto-Send' : '▶️ Enable Auto-Send';
+        toggleBtn.onclick = toggleAutoSendForCurrentEmail;
+      }
+
+      if (editDraftBtn) {
+        editDraftBtn.onclick = () => {
+          closeMonitoringEmailModal();
+          openEditModal(email.id);
+        };
+      }
     } else {
       draftBox.style.display = 'none';
       draftPre.textContent = '';
@@ -330,6 +644,26 @@ function openMonitoringEmailModal(id) {
   if (taskBtn) taskBtn.onclick = onModalCreateTaskClick;
 
   document.getElementById('monitoringEmailModal').style.display = 'flex';
+}
+
+async function toggleAutoSendForCurrentEmail() {
+  if (!currentModalEmail) return;
+  const id = currentModalEmail.id;
+  try {
+    const res = await fetch(`/api/emails/${id}/toggle-autosend`, { method: 'POST', headers: AUTH_HEADERS });
+    const data = await res.json();
+    if (data.success) {
+      currentModalEmail.send_at = data.send_at;
+      // Re-render modal status
+      openMonitoringEmailModal(currentModalEmail);
+      // Refresh list
+      refreshData();
+    } else {
+      alert('Error: ' + data.message);
+    }
+  } catch (e) {
+    alert('Failed to toggle auto-send: ' + e.message);
+  }
 }
 
 function closeMonitoringEmailModal() {
@@ -406,116 +740,283 @@ async function triggerAgentSync() {
   }
 }
 
-// ── Drafts List ─────────────────────────────────────────────────────────────
+// ── AI Drafts State & Controller ───────────────────────────────────────────
+let currentDraftSubTab = 'active'; // 'active', 'expired', 'important', 'history'
+let currentDraftCategory = 'all'; // 'all', 'important', 'person', 'general'
+let currentDraftSearch = '';
+
+function filterDraftsSubTab(tabName) {
+  currentDraftSubTab = tabName;
+  const tabIds = {
+    'active': 'draftTabActive',
+    'expired': 'draftTabExpired',
+    'important': 'draftTabImportant',
+    'history': 'draftTabHistory'
+  };
+  ['draftTabActive', 'draftTabExpired', 'draftTabImportant', 'draftTabHistory'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', id === tabIds[tabName]);
+  });
+  renderDraftsList();
+}
+
+function filterDraftCategory(catName) {
+  currentDraftCategory = catName;
+  const catIds = {
+    'all': 'btnDraftCatAll',
+    'important': 'btnDraftCatImportant',
+    'person': 'btnDraftCatPerson',
+    'general': 'btnDraftCatGeneral'
+  };
+  ['btnDraftCatAll', 'btnDraftCatImportant', 'btnDraftCatPerson', 'btnDraftCatGeneral'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', id === catIds[catName]);
+  });
+  renderDraftsList();
+}
+
+function onDraftSearch(val) {
+  currentDraftSearch = (val || '').toLowerCase().trim();
+  const clearBtn = document.getElementById('draftSearchClear');
+  if (clearBtn) clearBtn.style.display = currentDraftSearch ? 'inline-block' : 'none';
+  renderDraftsList();
+}
+
+function clearDraftSearch() {
+  const input = document.getElementById('draftSearchInput');
+  if (input) input.value = '';
+  currentDraftSearch = '';
+  const clearBtn = document.getElementById('draftSearchClear');
+  if (clearBtn) clearBtn.style.display = 'none';
+  renderDraftsList();
+}
+
+function checkIsOver20Mins(email) {
+  if (!email) return false;
+  // If email timer was scheduled and expired
+  if (email.send_at) {
+    const diff = new Date(email.send_at).getTime() - Date.now();
+    if (diff <= 0) return true;
+  }
+  // If received more than 20 minutes ago
+  if (email.received_at) {
+    const ageMs = Date.now() - new Date(email.received_at).getTime();
+    if (ageMs > 20 * 60 * 1000) return true;
+  }
+  return false;
+}
+
+function formatDraftDateTime(isoStr) {
+  if (!isoStr) return { dateStr: 'Recent', relStr: '' };
+  try {
+    const d = new Date(isoStr);
+    const dateStr = d.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true
+    });
+    const relStr = formatRelativeTime(isoStr);
+    return { dateStr, relStr };
+  } catch {
+    return { dateStr: 'Recent', relStr: '' };
+  }
+}
+
+// ── Render Drafts List ──────────────────────────────────────────────────────
 function renderDraftsList() {
   const container = document.getElementById('draftsList');
-  const pendingDrafts = allEmails.filter(e => e.status === 'Pending' && e.draft_reply);
-  const processedDrafts = allEmails.filter(e => e.status !== 'Pending' && e.draft_reply);
+  if (!container) return;
 
   // Clear old countdown intervals
   countdownIntervals.forEach(id => clearInterval(id));
   countdownIntervals = [];
 
-  let html = '';
+  // All emails with draft reply
+  const allDraftEmails = allEmails.filter(e => !!e.draft_reply);
 
-  // 1. Pending Review Section
-  html += `
-    <div class="drafts-section-header">
-      <h3>⏳ Pending Review (${pendingDrafts.length})</h3>
-    </div>
-  `;
-  
-  if (!pendingDrafts.length) {
-    html += `
-      <div class="empty-state-card" style="margin-bottom: 24px;">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        <p>No pending drafts. Run the agent to generate AI draft replies.</p>
-      </div>
-    `;
+  // 1. Categorize drafts
+  const pendingAll = allDraftEmails.filter(e => e.status === 'Pending' || !e.status);
+  const processedAll = allDraftEmails.filter(e => e.status !== 'Pending' && !!e.status);
+
+  const activeDraftsAll = pendingAll.filter(e => !checkIsOver20Mins(e));
+  const expiredDraftsAll = pendingAll.filter(e => checkIsOver20Mins(e));
+  const importantDraftsAll = allDraftEmails.filter(e => {
+    const cat = (e.category || '').toLowerCase();
+    const prio = (e.priority || '').toLowerCase();
+    return cat === 'important' || prio === 'high';
+  });
+
+  // 2. Update Stats & Tab Badges
+  const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  setTxt('statDraftsActive', activeDraftsAll.length);
+  setTxt('statDraftsExpired', expiredDraftsAll.length);
+  setTxt('statDraftsImportant', importantDraftsAll.length);
+  setTxt('statDraftsSent', processedAll.length);
+
+  setTxt('badgeDraftActive', activeDraftsAll.length);
+  setTxt('badgeDraftExpired', expiredDraftsAll.length);
+  setTxt('badgeDraftImportant', importantDraftsAll.length);
+  setTxt('badgeDraftHistory', processedAll.length);
+
+  // 3. Select items based on sub-tab
+  let selectedList = [];
+  let tabTitle = '';
+  let tabSubDesc = '';
+
+  if (currentDraftSubTab === 'active') {
+    // Only top 20 active drafts contained in the first tab
+    selectedList = activeDraftsAll.slice(0, 20);
+    tabTitle = `⚡ Active Draft Queue (≤ 20m) — Showing ${selectedList.length} of ${activeDraftsAll.length}`;
+    tabSubDesc = `Freshly generated AI draft replies ready for review or scheduled auto-dispatch within 20 minutes (Max 20 per batch).`;
+  } else if (currentDraftSubTab === 'expired') {
+    selectedList = expiredDraftsAll;
+    tabTitle = `🕒 Expired / Older Drafts (> 20m) (${expiredDraftsAll.length})`;
+    tabSubDesc = `Drafts that have exceeded the 20-minute active auto-dispatch window or older messages held for manual review.`;
+  } else if (currentDraftSubTab === 'important') {
+    selectedList = importantDraftsAll;
+    tabTitle = `⭐ Important & High Priority Pitches (${importantDraftsAll.length})`;
+    tabSubDesc = `High-value pitch drafts tailored for clients, career inquiries, interviews, and business contacts.`;
   } else {
-    html += `<div class="drafts-grid" style="margin-bottom: 28px;">` + pendingDrafts.map(e => {
-      const acc = allImapAccounts.find(a => a.id === e.imap_account_id);
-      const accText = acc ? `To: ${escHtml(acc.email)}` : '';
-      return `
-      <div class="draft-card" id="draft-${e.id}">
-        <div class="draft-header">
-          <div>
-            <div class="draft-sender">↩ Reply to: ${escHtml(e.sender)} ${accText ? `<span style="opacity:0.6; font-size:0.8rem; margin-left:6px;">(${accText})</span>` : ''}</div>
-            <div class="draft-subject">${escHtml(e.subject)}</div>
-          </div>
-          <div class="${e.requires_approval ? 'draft-timer expired' : 'draft-timer'}" id="timer-${e.id}" data-send-at="${e.send_at || ''}">
-            ${e.requires_approval ? '⚠️ Permission Required' : '⏱ Calculating...'}
-          </div>
-        </div>
-        ${e.summary ? `<div class="draft-summary">📋 <strong>Summary:</strong> ${escHtml(e.summary)}</div>` : ''}
-        <div class="draft-body">${escHtml(e.draft_reply)}</div>
-        <div class="draft-actions">
-          <button class="btn-approve" onclick="approveDraft(${e.id})">✅ Approve & Send</button>
-          <button class="btn-edit" onclick="openEditModal(${e.id})">✏️ Edit</button>
-          <button class="btn-reject" onclick="rejectDraft(${e.id})">❌ Reject</button>
-        </div>
-      </div>
-      `;
-    }).join('') + `</div>`;
+    selectedList = processedAll;
+    tabTitle = `📜 Processed & Sent Drafts History (${processedAll.length})`;
+    tabSubDesc = `Historical archive of approved, auto-sent, and archived email reply dispatches.`;
   }
 
-  // 2. Drafts History Section
-  html += `
-    <div class="drafts-section-header">
-      <h3>📜 Drafts History (${processedDrafts.length})</h3>
+  // 4. Apply Category filter
+  if (currentDraftCategory === 'important') {
+    selectedList = selectedList.filter(e => (e.category || '').toLowerCase() === 'important');
+  } else if (currentDraftCategory === 'person') {
+    selectedList = selectedList.filter(e => (e.category || '').toLowerCase() === 'important');
+  } else if (currentDraftCategory === 'general') {
+    selectedList = selectedList.filter(e => (e.category || '').toLowerCase() !== 'important');
+  }
+
+  // 5. Apply Search filter
+  if (currentDraftSearch) {
+    selectedList = selectedList.filter(e => {
+      const text = `${e.sender || ''} ${e.subject || ''} ${e.summary || ''} ${e.draft_reply || ''} ${e.intent || ''}`.toLowerCase();
+      return text.includes(currentDraftSearch);
+    });
+  }
+
+  // 6. Render Output
+  let html = `
+    <div class="drafts-section-header" style="margin-bottom: 16px;">
+      <h3 style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+        <span>${escHtml(tabTitle)}</span>
+        ${currentDraftSubTab === 'active' && activeDraftsAll.length > 20 ? '<span class="badge badge-medium" style="font-size:0.75rem;">Showing Top 20 Active</span>' : ''}
+      </h3>
+      <p style="font-size:0.83rem; color:var(--text-secondary); margin-top:4px;">${escHtml(tabSubDesc)}</p>
     </div>
   `;
 
-  if (!processedDrafts.length) {
+  if (!selectedList.length) {
+    const emptyMsg = currentDraftSubTab === 'expired' 
+      ? 'Great job! No expired drafts pending review.'
+      : currentDraftSubTab === 'active'
+      ? 'No active drafts in the 20-min window. Run the agent to sync fresh incoming emails.'
+      : 'No drafts found matching current filters.';
+
     html += `
-      <div class="empty-state-card">
-        <p>No processed drafts in history yet.</p>
+      <div class="empty-state-card" style="padding: 48px 24px; text-align:center;">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.4; margin-bottom:12px;"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        <p style="color:var(--text-secondary); font-size:0.95rem;">${emptyMsg}</p>
+        <button class="btn btn-primary" onclick="triggerLiveCheck()" style="margin-top:14px; font-size:0.85rem; padding:7px 16px;">⚡ Run Agent Ingestion</button>
       </div>
     `;
-  } else {
-    html += `<div class="drafts-grid">` + processedDrafts.map(e => {
-      let statusBadge = '';
-      if (e.status === 'Sent' || e.status === 'Approved') {
-        statusBadge = '<span class="badge badge-low">Sent</span>';
-      } else if (e.status === 'Auto-Sent') {
-        statusBadge = '<span class="badge badge-medium">Auto-Sent</span>';
-      } else if (e.status === 'Rejected') {
-        statusBadge = '<span class="badge badge-high">Rejected</span>';
+    container.innerHTML = html;
+    return;
+  }
+
+  html += `<div class="drafts-grid">` + selectedList.map(e => {
+    const acc = allImapAccounts.find(a => a.id === e.imap_account_id);
+    const accText = acc ? `To: ${escHtml(acc.email)}` : '';
+    const { dateStr, relStr } = formatDraftDateTime(e.received_at);
+    const pLower = (e.priority || 'medium').toLowerCase();
+    const cLower = (e.category || 'important').toLowerCase();
+    const isOver20 = checkIsOver20Mins(e);
+    const isPending = e.status === 'Pending' || !e.status;
+
+    let timerHtml = '';
+    if (e.requires_approval) {
+      timerHtml = `<div class="draft-timer expired">⚠️ Approval Required</div>`;
+    } else if (isPending) {
+      if (isOver20) {
+        timerHtml = `<div class="draft-timer expired" title="Exceeded 20m window">🕒 Expired (> 20m)</div>`;
+      } else if (e.send_at) {
+        timerHtml = `<div class="draft-timer" id="timer-${e.id}" data-send-at="${e.send_at}">⏱ Calculating...</div>`;
       } else {
-        statusBadge = `<span class="badge">${escHtml(e.status)}</span>`;
+        timerHtml = `<div class="draft-timer" style="background:rgba(99,102,241,0.15); color:var(--accent); border-color:rgba(99,102,241,0.3);">⚡ Pending Dispatch</div>`;
       }
+    } else {
+      let statusBadge = '<span class="badge badge-low">Sent</span>';
+      if (e.status === 'Auto-Sent') statusBadge = '<span class="badge badge-medium">Auto-Sent</span>';
+      if (e.status === 'Rejected') statusBadge = '<span class="badge badge-high">Rejected</span>';
+      timerHtml = `<div class="draft-status">${statusBadge}</div>`;
+    }
 
-      const acc = allImapAccounts.find(a => a.id === e.imap_account_id);
-      const accText = acc ? `To: ${escHtml(acc.email)}` : '';
-
-      return `
-        <div class="draft-card processed-draft" id="draft-${e.id}" style="opacity: 0.85; border-left: 3px solid var(--border);">
-          <div class="draft-header">
-            <div>
-              <div class="draft-sender">↩ Reply to: ${escHtml(e.sender)} ${accText ? `<span style="opacity:0.6; font-size:0.8rem; margin-left:6px;">(${accText})</span>` : ''}</div>
-              <div class="draft-subject">${escHtml(e.subject)}</div>
+    return `
+      <div class="draft-card ${!isPending ? 'processed-draft' : ''} ${isOver20 && isPending ? 'draft-card-expired' : ''}" id="draft-${e.id}">
+        <!-- Top Header & Date/Time info -->
+        <div class="draft-header">
+          <div style="flex: 1; min-width: 0;">
+            <div class="draft-meta-top-row">
+              <span class="draft-date-chip">📅 ${escHtml(dateStr)} ${relStr ? `<strong style="opacity:0.85;">(${escHtml(relStr)})</strong>` : ''}</span>
+              <span class="badge badge-${pLower}">${escHtml(e.priority || 'Medium')}</span>
+              <span class="pill pill-${cLower}">${escHtml(e.category || 'Important')}</span>
+              ${e.intent ? `<span class="intent-tag">🎯 ${escHtml(e.intent)}</span>` : ''}
             </div>
-            <div class="draft-status">
-              ${statusBadge}
+            <div class="draft-sender" style="margin-top:6px;">
+              ↩ Reply to: <strong>${escHtml(e.sender)}</strong> ${accText ? `<span style="opacity:0.65; font-size:0.78rem; margin-left:6px;">(${accText})</span>` : ''}
             </div>
+            <div class="draft-subject">${escHtml(e.subject || 'No Subject')}</div>
           </div>
-          ${e.summary ? `<div class="draft-summary">📋 <strong>Summary:</strong> ${escHtml(e.summary)}</div>` : ''}
-          <div class="draft-body" style="background: rgba(255,255,255,0.015); border-color: rgba(255,255,255,0.03); max-height: 120px; overflow-y: auto;">${escHtml(e.draft_reply)}</div>
+          <div style="flex-shrink:0; margin-left:12px;">
+            ${timerHtml}
+          </div>
         </div>
-      `;
-    }).join('') + `</div>`;
-  }
+
+        <!-- Summary & Draft Content -->
+        ${e.summary ? `<div class="draft-summary">📋 <strong>Summary:</strong> ${escHtml(e.summary)}</div>` : ''}
+        <div class="draft-body">
+          <div class="draft-body-header">
+            <span>🤖 AI Drafted Pitch / Response:</span>
+          </div>
+          <div class="draft-body-content">${escHtml(e.draft_reply)}</div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="draft-actions">
+          ${isPending ? `
+            <button class="btn-approve" onclick="approveDraft(${e.id})">✅ Approve & Send</button>
+            <button class="btn-edit" onclick="openEditModal(${e.id})">✏️ Edit Pitch</button>
+            <button class="btn-reject" onclick="rejectDraft(${e.id})">❌ Reject</button>
+            <button class="btn-reject" onclick="deleteEmail(${e.id})" title="Delete email" style="background:rgba(239,68,68,0.08); border-color:rgba(239,68,68,0.2);">🗑️ Delete</button>
+          ` : `
+            <button class="btn-card-view" onclick="openMonitoringEmailModal(${e.id})" style="font-size:0.8rem; padding:6px 12px;">👁️ View Details</button>
+            <button class="btn-reject" onclick="deleteEmail(${e.id})" title="Delete email" style="font-size:0.8rem; padding:4px 10px; margin-left:auto;">🗑️ Delete</button>
+          `}
+        </div>
+      </div>
+
+    `;
+  }).join('') + `</div>`;
 
   container.innerHTML = html;
 
-  // Start countdown timers
-  pendingDrafts.forEach(e => {
-    if (e.send_at && !e.requires_approval) {
-      const timerId = setInterval(() => updateTimer(e.id, e.send_at, timerId), 1000);
-      countdownIntervals.push(timerId);
-      updateTimer(e.id, e.send_at, timerId);
-    }
-  });
+  // Start countdown timers for active drafts
+  if (currentDraftSubTab === 'active' || currentDraftSubTab === 'important') {
+    selectedList.forEach(e => {
+      if (e.send_at && !e.requires_approval && (e.status === 'Pending' || !e.status) && !checkIsOver20Mins(e)) {
+        const timerId = setInterval(() => updateTimer(e.id, e.send_at, timerId), 1000);
+        countdownIntervals.push(timerId);
+        updateTimer(e.id, e.send_at, timerId);
+      }
+    });
+  }
 }
 
 function updateTimer(emailId, sendAt, intervalId) {
@@ -524,7 +1025,7 @@ function updateTimer(emailId, sendAt, intervalId) {
 
   const diff = new Date(sendAt) - new Date();
   if (diff <= 0) {
-    el.textContent = '⏱ Auto-sending...';
+    el.textContent = '🕒 Expired (> 20m)';
     el.classList.add('expired');
     clearInterval(intervalId);
     return;
@@ -541,9 +1042,9 @@ async function approveDraft(id) {
   try {
     const res = await fetch(`/api/emails/${id}/approve`, { method: 'POST', headers: AUTH_HEADERS });
     const data = await res.json();
-    alert(data.message);
+    showToast('✓ ' + data.message, 'success');
     refreshData();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { showToast('✕ Error: ' + e.message, 'error'); }
 }
 
 async function rejectDraft(id) {
@@ -551,9 +1052,9 @@ async function rejectDraft(id) {
   try {
     const res = await fetch(`/api/emails/${id}/reject`, { method: 'POST', headers: AUTH_HEADERS });
     const data = await res.json();
-    alert(data.message);
+    showToast('✓ ' + data.message, 'success');
     refreshData();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { showToast('✕ Error: ' + e.message, 'error'); }
 }
 
 function openEditModal(id) {
@@ -579,11 +1080,12 @@ async function submitEditDraft() {
       body: JSON.stringify({ draft_reply })
     });
     const data = await res.json();
-    alert(data.message);
+    showToast('✓ ' + data.message, 'success');
     closeEditModal();
     refreshData();
-  } catch (e) { alert('Error: ' + e.message); }
+  } catch (e) { showToast('✕ Error: ' + e.message, 'error'); }
 }
+
 
 // ── Analytics ───────────────────────────────────────────────────────────────
 async function loadAnalytics() {
@@ -667,15 +1169,49 @@ let allUsersList = [];
 async function loadSettings() {
   loadImapAccounts();
 
+  // Load auto-reply rules & global settings
+  try {
+    const res = await fetch('/api/settings', { headers: AUTH_HEADERS });
+    const data = await res.json();
+    if (data.success && data.settings) {
+      const s = data.settings;
+      
+      // Auto-reply rules
+      const masterEl = document.getElementById('ruleMasterAutoReply');
+      if (masterEl) {
+        masterEl.checked = s.rule_master_autoreply !== 'false';
+        toggleAutoReplyFormState(masterEl.checked);
+      }
+
+      const delayEl = document.getElementById('ruleAutoSendDelay');
+      if (delayEl && s.rule_delay_mins !== undefined && s.rule_delay_mins !== null) {
+        delayEl.value = s.rule_delay_mins;
+      }
+
+      const impEl = document.getElementById('ruleReplyImportant');
+      if (impEl) impEl.checked = s.rule_reply_important !== 'false';
+
+      const promoEl = document.getElementById('ruleReplyPromotion');
+      if (promoEl) promoEl.checked = s.rule_reply_promotion === 'true';
+
+      const newsEl = document.getElementById('ruleReplyNewsletter');
+      if (newsEl) newsEl.checked = s.rule_reply_newsletter === 'true';
+
+      const spamEl = document.getElementById('ruleReplySpam');
+      if (spamEl) spamEl.checked = s.rule_reply_spam === 'true';
+
+      // Admin global settings
+      if (USER_ROLE === 'admin') {
+        const gemKey = document.getElementById('setGeminiKey');
+        const gemMod = document.getElementById('setGeminiModel');
+        if (gemKey) gemKey.value = s.gemini_api_key || '';
+        if (gemMod) gemMod.value = s.gemini_model || '';
+      }
+    }
+  } catch (e) { console.error('Settings load error:', e); }
+
   if (USER_ROLE === 'admin') {
     try {
-      const res = await fetch('/api/settings', { headers: AUTH_HEADERS });
-      const data = await res.json();
-      if (data.success) {
-        document.getElementById('setGeminiKey').value = data.settings.gemini_api_key || '';
-        document.getElementById('setGeminiModel').value = data.settings.gemini_model || '';
-      }
-      
       const usersRes = await fetch('/api/users', { headers: AUTH_HEADERS });
       const usersData = await usersRes.json();
       if (usersData.success) {
@@ -685,7 +1221,52 @@ async function loadSettings() {
           select.innerHTML = allUsersList.map(u => `<option value="${u.id}">${u.email} (${u.role})</option>`).join('');
         }
       }
-    } catch (e) { console.error('Admin settings error:', e); }
+    } catch (e) { console.error('Admin users load error:', e); }
+  }
+}
+
+function toggleAutoReplyFormState(enabled) {
+  const container = document.getElementById('autoReplyOptionsContainer');
+  if (container) {
+    container.style.opacity = enabled ? '1' : '0.45';
+    container.style.pointerEvents = enabled ? 'auto' : 'none';
+  }
+}
+
+async function saveAutoReplySettings() {
+  const btn = document.getElementById('saveAutoReplyBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+
+  const settings = {
+    rule_master_autoreply: document.getElementById('ruleMasterAutoReply').checked ? 'true' : 'false',
+    rule_delay_mins: document.getElementById('ruleAutoSendDelay').value,
+    rule_reply_important: document.getElementById('ruleReplyImportant').checked ? 'true' : 'false',
+    rule_reply_promotion: document.getElementById('ruleReplyPromotion').checked ? 'true' : 'false',
+    rule_reply_newsletter: document.getElementById('ruleReplyNewsletter').checked ? 'true' : 'false',
+    rule_reply_spam: document.getElementById('ruleReplySpam').checked ? 'true' : 'false'
+  };
+
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { ...AUTH_HEADERS, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings })
+    });
+    const data = await res.json();
+    if (data.success) {
+      // Toast message
+      const msg = document.createElement('div');
+      msg.style.cssText = 'position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#059669;color:white;padding:12px 24px;border-radius:8px;font-size:0.9rem;z-index:10000;box-shadow:0 4px 12px rgba(0,0,0,0.3);';
+      msg.textContent = '✓ Auto-Reply rules saved successfully!';
+      document.body.appendChild(msg);
+      setTimeout(() => msg.remove(), 3500);
+    } else {
+      alert('Error: ' + data.message);
+    }
+  } catch (e) {
+    alert('Failed to save settings: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Save Rules'; }
   }
 }
 
@@ -764,7 +1345,7 @@ async function loadImapAccounts() {
             </div>
           </div>
           <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:14px; border-top:1px solid rgba(255,255,255,0.05); padding-top:12px;">
-            <button type="button" class="action-btn-view" onclick="openEditAccountModal(${acc.id}, '${escHtml(acc.email)}', '${escHtml(acc.imap_server)}', ${acc.imap_port}, '${escHtml(acc.imap_user)}')" style="padding:4px 8px; font-size:0.75rem; background:rgba(255,255,255,0.05); border:1px solid var(--border); color:var(--text-primary); border-radius:4px; cursor:pointer;">✏️ Edit</button>
+            <button type="button" class="action-btn-view" onclick="openEditAccountModal(${acc.id}, '${escHtml(acc.email)}')" style="padding:4px 8px; font-size:0.75rem; background:rgba(255,255,255,0.05); border:1px solid var(--border); color:var(--text-primary); border-radius:4px; cursor:pointer;">✏️ Edit</button>
             <button type="button" class="action-btn-reject" onclick="deleteAccount(${acc.id})" style="padding:4px 8px; font-size:0.75rem; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.2); color:var(--red); border-radius:4px; cursor:pointer;">🗑️ Disconnect</button>
           </div>
         </div>
@@ -791,14 +1372,11 @@ function openAddAccountModal() {
   document.getElementById('accountModal').style.display = 'flex';
 }
 
-function openEditAccountModal(id, email, server, port, user) {
+function openEditAccountModal(id, email) {
   document.getElementById('accountForm').reset();
   document.getElementById('accountEditId').value = id;
   document.getElementById('accountEmail').value = email;
   document.getElementById('accountEmail').disabled = true;
-  document.getElementById('accountImapServer').value = server;
-  document.getElementById('accountImapPort').value = port;
-  document.getElementById('accountImapUser').value = user;
   document.getElementById('accountImapPassword').placeholder = '•••••••• (Enter new to change)';
   
   document.getElementById('accountModalTitle').textContent = 'Edit Connection Settings';
@@ -812,34 +1390,10 @@ function closeAccountModal() {
   document.getElementById('accountModal').style.display = 'none';
 }
 
-function autoSuggestImapServer() {
-  const email = document.getElementById('accountEmail').value.trim();
-  if (!email || !email.includes('@')) return;
-
-  const domain = email.split('@')[1].toLowerCase();
-  let server = 'imap.' + domain;
-  let port = '993';
-
-  if (domain === 'gmail.com') {
-    server = 'imap.gmail.com';
-  } else if (domain === 'outlook.com' || domain === 'hotmail.com' || domain === 'live.com' || domain === 'office365.com') {
-    server = 'outlook.office365.com';
-  } else if (domain === 'yahoo.com') {
-    server = 'imap.mail.yahoo.com';
-  }
-
-  document.getElementById('accountImapServer').value = server;
-  document.getElementById('accountImapPort').value = port;
-  document.getElementById('accountImapUser').value = email;
-}
-
 async function submitAccountForm(e) {
   e.preventDefault();
   const editId = document.getElementById('accountEditId').value;
   const email = document.getElementById('accountEmail').value.trim();
-  const imap_server = document.getElementById('accountImapServer').value.trim();
-  const imap_port = document.getElementById('accountImapPort').value.trim();
-  const imap_user = document.getElementById('accountImapUser').value.trim();
   const imap_password = document.getElementById('accountImapPassword').value;
   const userId = document.getElementById('accountAdminUserSelect')?.value || null;
 
@@ -848,7 +1402,7 @@ async function submitAccountForm(e) {
     return;
   }
 
-  const payload = { email, imap_server, imap_port, imap_user, imap_password };
+  const payload = { email, imap_password };
   if (USER_ROLE === 'admin' && userId) {
     payload.userId = userId;
   }
@@ -1275,18 +1829,21 @@ async function sendComposerEmail() {
     });
     const data = await res.json();
     if (data.success) {
-      alert('Email sent successfully!');
+      showToast('✓ ' + data.message, 'success');
       // Clear composer forms
       document.getElementById('compRecipient').value = '';
       document.getElementById('compSubject').value = '';
       document.getElementById('compPrompt').value = '';
       document.getElementById('compRefEmail').value = '';
       document.getElementById('compOutput').value = '';
+      // Refresh data so the sent email immediately shows in Sent Logs!
+      await refreshData();
+      renderSentLogs();
     } else {
-      alert('Failed to send email: ' + data.message);
+      showToast('✕ ' + data.message, 'error');
     }
   } catch (e) {
-    alert('Error sending email: ' + e.message);
+    showToast('✕ Error sending email: ' + e.message, 'error');
   } finally {
     textSpan.textContent = 'AI is writing your draft...';
     loader.style.display = 'none';
@@ -1295,45 +1852,115 @@ async function sendComposerEmail() {
 
 // ── Sent Emails Logs ────────────────────────────────────────────────────────
 let sentSearchQuery = '';
+let currentSentTypeFilter = 'all'; // 'all', 'composer', 'auto', 'approved'
+
+function filterSentLogsType(type) {
+  currentSentTypeFilter = type;
+  const btnMap = {
+    'all': 'btnSentTypeAll',
+    'composer': 'btnSentTypeComposer',
+    'auto': 'btnSentTypeAuto',
+    'approved': 'btnSentTypeApproved'
+  };
+  ['btnSentTypeAll', 'btnSentTypeComposer', 'btnSentTypeAuto', 'btnSentTypeApproved'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', id === btnMap[type]);
+  });
+  renderSentLogs();
+}
+
+function onSentSearch(val) {
+  sentSearchQuery = (val || '').toLowerCase().trim();
+  const clearBtn = document.getElementById('sentSearchClear');
+  if (clearBtn) clearBtn.style.display = sentSearchQuery ? 'inline-block' : 'none';
+  renderSentLogs();
+}
+
+function clearSentSearch() {
+  const input = document.getElementById('sentSearchInput');
+  if (input) input.value = '';
+  sentSearchQuery = '';
+  const clearBtn = document.getElementById('sentSearchClear');
+  if (clearBtn) clearBtn.style.display = 'none';
+  renderSentLogs();
+}
 
 function renderSentLogs() {
   const tbody = document.getElementById('sentLogsBody');
   if (!tbody) return;
 
-  const sentEmails = allEmails.filter(e => {
-    // Only display sent emails
-    if (e.status !== 'Sent') return false;
-
-    if (sentSearchQuery) {
-      const q = sentSearchQuery;
-      const matchSender = (e.sender || '').toLowerCase().includes(q);
-      const matchSubject = (e.subject || '').toLowerCase().includes(q);
-      const matchReply = (e.draft_reply || '').toLowerCase().includes(q);
-      return matchSender || matchSubject || matchReply;
-    }
-    return true;
+  // 1. Filter all outbound / sent emails
+  const allSentList = allEmails.filter(e => {
+    const st = (e.status || '').toLowerCase();
+    const cat = (e.category || '').toLowerCase();
+    return cat === 'composer' || st === 'sent' || st === 'auto-sent' || st === 'approved' || (e.draft_reply && st !== 'pending' && st !== 'rejected');
   });
 
-  if (sentEmails.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="empty-state">No sent emails logged yet. Approve a draft to send.</td></tr>`;
+  // 2. Update stats cards
+  const composerCount = allSentList.filter(e => (e.category || '').toLowerCase() === 'composer').length;
+  const autoCount = allSentList.filter(e => (e.status || '').toLowerCase() === 'auto-sent').length;
+  const approvedCount = allSentList.filter(e => (e.status || '').toLowerCase() === 'sent' && (e.category || '').toLowerCase() !== 'composer').length;
+
+  const setTxt = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  setTxt('statSentTotal', allSentList.length);
+  setTxt('statSentComposer', composerCount);
+  setTxt('statSentAuto', autoCount);
+  setTxt('statSentApproved', approvedCount);
+
+  // 3. Apply type filter
+  let filtered = allSentList;
+  if (currentSentTypeFilter === 'composer') {
+    filtered = filtered.filter(e => (e.category || '').toLowerCase() === 'composer');
+  } else if (currentSentTypeFilter === 'auto') {
+    filtered = filtered.filter(e => (e.status || '').toLowerCase() === 'auto-sent');
+  } else if (currentSentTypeFilter === 'approved') {
+    filtered = filtered.filter(e => (e.status || '').toLowerCase() === 'sent' && (e.category || '').toLowerCase() !== 'composer');
+  }
+
+  // 4. Apply search filter
+  if (sentSearchQuery) {
+    const q = sentSearchQuery;
+    filtered = filtered.filter(e => {
+      const matchSender = (e.sender || '').toLowerCase().includes(q);
+      const matchSubject = (e.subject || '').toLowerCase().includes(q);
+      const matchReply = (e.draft_reply || e.body || '').toLowerCase().includes(q);
+      return matchSender || matchSubject || matchReply;
+    });
+  }
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="empty-state">No sent emails found matching your filters.</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = sentEmails.map(e => {
-    const formattedDate = new Date(e.received_at).toLocaleString();
-    const truncatedReply = e.draft_reply && e.draft_reply.length > 85 
-      ? e.draft_reply.substring(0, 85) + '...' 
-      : (e.draft_reply || 'No reply text');
+  tbody.innerHTML = filtered.map(e => {
+    const isComposer = (e.category || '').toLowerCase() === 'composer';
+    const isAuto = (e.status || '').toLowerCase() === 'auto-sent';
+
+    let typeBadge = '';
+    if (isComposer) {
+      typeBadge = `<span class="badge" style="background:rgba(129,140,248,0.18); color:#818cf8; border:1px solid rgba(129,140,248,0.3); font-size:0.75rem; padding:3px 8px; border-radius:12px; font-weight:600;">✍️ Composer</span>`;
+    } else if (isAuto) {
+      typeBadge = `<span class="badge" style="background:rgba(245,158,11,0.18); color:#fbbf24; border:1px solid rgba(245,158,11,0.3); font-size:0.75rem; padding:3px 8px; border-radius:12px; font-weight:600;">⚡ Auto-Sent</span>`;
+    } else {
+      typeBadge = `<span class="badge" style="background:rgba(16,185,129,0.18); color:#34d399; border:1px solid rgba(16,185,129,0.3); font-size:0.75rem; padding:3px 8px; border-radius:12px; font-weight:600;">✅ Approved</span>`;
+    }
+
+    const dateVal = e.received_at ? new Date(e.received_at) : new Date();
+    const formattedDate = dateVal.toLocaleString();
+    const sentText = e.draft_reply || e.body || 'No message content';
+    const truncatedReply = sentText.length > 90 ? sentText.substring(0, 90) + '...' : sentText;
 
     return `
       <tr>
-        <td style="font-weight:600; color:var(--text-primary); word-break:break-all;">${e.sender}</td>
-        <td style="color:var(--text-secondary); max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${e.subject || '(No Subject)'}</td>
-        <td><span class="pill pill-${(e.category || 'important').toLowerCase()}">${e.category || 'important'}</span></td>
-        <td style="font-family:monospace; font-size:0.8rem; max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${e.draft_reply || ''}">${truncatedReply}</td>
-        <td style="color:var(--text-muted); font-size:0.8rem;">${formattedDate}</td>
+        <td>${typeBadge}</td>
+        <td style="font-weight:600; color:var(--text-primary); word-break:break-all;">${escHtml(e.sender || 'Direct Outbound')}</td>
+        <td style="color:var(--text-secondary); max-width:200px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${escHtml(e.subject || '')}">${escHtml(e.subject || '(No Subject)')}</td>
+        <td><span class="pill pill-${(e.category || 'important').toLowerCase()}">${escHtml(e.category || 'general')}</span></td>
+        <td style="font-family:monospace; font-size:0.8rem; max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escHtml(sentText)}">${escHtml(truncatedReply)}</td>
+        <td style="color:var(--text-muted); font-size:0.8rem;">${escHtml(formattedDate)}</td>
         <td style="text-align:center;">
-          <button class="action-btn-view" onclick="openMonitoringEmailModal(${e.id})" title="View Details" style="background:rgba(99,102,241,0.1); border:none; border-radius:4px; padding:6px 12px; color:var(--accent); cursor:pointer;">
+          <button class="action-btn-view" onclick="openMonitoringEmailModal(${e.id})" title="View Details" style="background:rgba(99,102,241,0.1); border:1px solid rgba(99,102,241,0.25); border-radius:4px; padding:5px 10px; color:var(--accent); cursor:pointer; font-size:0.78rem;">
             👁️ View
           </button>
         </td>
@@ -1342,76 +1969,29 @@ function renderSentLogs() {
   }).join('');
 }
 
-function onSentSearch(val) {
-  sentSearchQuery = (val || '').toLowerCase().trim();
-  renderSentLogs();
-}
-
-// ── Onboarding Handlers ──────────────────────────────────────────────────────
-function autoSuggestOnboardImap() {
-  const email = document.getElementById('onboardEmail').value.trim();
-  if (!email || !email.includes('@')) return;
-
-  const domain = email.split('@')[1].toLowerCase();
-  let server = 'imap.' + domain;
-  let port = '993';
-
-  if (domain === 'gmail.com') {
-    server = 'imap.gmail.com';
-  } else if (domain === 'outlook.com' || domain === 'hotmail.com' || domain === 'live.com' || domain === 'office365.com') {
-    server = 'outlook.office365.com';
-  } else if (domain === 'yahoo.com') {
-    server = 'imap.mail.yahoo.com';
+// ── Inbox Overload Quick Clean ──────────────────────────────────────────────
+async function quickCleanJunk() {
+  if (!confirm('🧹 Clean Clutter: Do you want to purge all Spam, Promotional, and Newsletter emails to de-clutter your inbox?')) {
+    return;
   }
 
-  document.getElementById('onboardImapServer').value = server;
-  document.getElementById('onboardImapPort').value = port;
-  document.getElementById('onboardImapUser').value = email;
-}
-
-async function submitOnboardingForm(e) {
-  e.preventDefault();
-  const email = document.getElementById('onboardEmail').value.trim();
-  const imap_server = document.getElementById('onboardImapServer').value.trim();
-  const imap_port = document.getElementById('onboardImapPort').value.trim();
-  const imap_user = document.getElementById('onboardImapUser').value.trim();
-  const imap_password = document.getElementById('onboardImapPassword').value;
-
-  const msgDiv = document.getElementById('onboardingMessage');
-  msgDiv.style.display = 'none';
-  msgDiv.className = 'auth-message';
-
-  const btn = document.getElementById('onboardingSubmitBtn');
-  btn.disabled = true;
-  btn.querySelector('span').textContent = 'Connecting...';
-
   try {
-    const res = await fetch('/api/imap-accounts', {
+    const res = await fetch('/api/clean-inbox', {
       method: 'POST',
       headers: { ...AUTH_HEADERS, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, imap_server, imap_port, imap_user, imap_password })
+      body: JSON.stringify({ purgeCategories: ['spam', 'promotion', 'newsletter'], olderThanDays: 0 })
     });
     const data = await res.json();
     if (data.success) {
-      document.getElementById('onboardingOverlay').style.display = 'none';
-      isOnboardingActive = false;
-      
-      // Spawn sync agent in background so they get fresh mock/real emails immediately
-      fetch('/api/run-agent', { method: 'POST', headers: AUTH_HEADERS }).catch(() => {});
-
-      await refreshData();
+      alert(`✨ Cleaned!\n${data.message}`);
+      refreshData();
     } else {
-      msgDiv.style.display = 'block';
-      msgDiv.className = 'auth-message error-message';
-      msgDiv.textContent = data.message;
-      btn.disabled = false;
-      btn.querySelector('span').textContent = 'Connect Mailbox & Get Started';
+      alert('Failed: ' + data.message);
     }
   } catch (err) {
-    msgDiv.style.display = 'block';
-    msgDiv.className = 'auth-message error-message';
-    msgDiv.textContent = 'Connection failed: ' + err.message;
-    btn.disabled = false;
-    btn.querySelector('span').textContent = 'Connect Mailbox & Get Started';
+    alert('Error cleaning inbox: ' + err.message);
   }
 }
+
+
+

@@ -102,14 +102,8 @@ async function handleSignUp(e) {
   const confirm = document.getElementById('confirmPassword').value;
   const btn = document.getElementById('signupBtn');
 
-  const lengthValid = password.length >= 9 && password.length <= 10;
-  const capitalValid = /[A-Z]/.test(password);
-  const lowerValid = /[a-z]/.test(password);
-  const specialValid = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/.test(password);
-  const noSpaceValid = !/\s/.test(password);
-
-  if (!lengthValid || !capitalValid || !lowerValid || !specialValid || !noSpaceValid) {
-    showMessage('Password must meet all complexity requirements.', 'error');
+  if (password.length < 6) {
+    showMessage('Password must be at least 6 characters long.', 'error');
     return;
   }
 
@@ -208,14 +202,8 @@ async function handleResetPassword(e) {
   const confirm = document.getElementById('confirmResetPassword').value;
   const btn = document.getElementById('resetBtn');
 
-  const lengthValid = password.length >= 9 && password.length <= 10;
-  const capitalValid = /[A-Z]/.test(password);
-  const lowerValid = /[a-z]/.test(password);
-  const specialValid = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/.test(password);
-  const noSpaceValid = !/\s/.test(password);
-
-  if (!lengthValid || !capitalValid || !lowerValid || !specialValid || !noSpaceValid) {
-    showMessage('Password must meet all complexity requirements.', 'error');
+  if (password.length < 6) {
+    showMessage('Password must be at least 6 characters long.', 'error');
     return;
   }
 
@@ -253,75 +241,10 @@ async function handleResetPassword(e) {
   }
 }
 
-// Password requirements dynamic indicator
-function updateRequirementItem(id, isValid, inputId = 'signupPassword') {
-  const el = document.getElementById(id);
-  if (!el) return;
-  if (isValid) {
-    el.classList.add('valid');
-    el.classList.remove('invalid');
-    el.querySelector('.req-icon').textContent = '✅';
-  } else {
-    el.classList.remove('valid');
-    const inputVal = document.getElementById(inputId).value;
-    if (inputVal.length > 0) {
-      el.classList.add('invalid');
-    } else {
-      el.classList.remove('invalid');
-    }
-    el.querySelector('.req-icon').textContent = '❌';
-  }
-}
-
-function initPasswordValidation() {
-  const passwordInput = document.getElementById('signupPassword');
-  if (passwordInput) {
-    passwordInput.addEventListener('input', () => {
-      const password = passwordInput.value;
-      const lengthValid = password.length >= 9 && password.length <= 10;
-      const capitalValid = /[A-Z]/.test(password);
-      const lowerValid = /[a-z]/.test(password);
-      const specialValid = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/.test(password);
-      const noSpaceValid = !/\s/.test(password);
-
-      updateRequirementItem('reqLength', lengthValid, 'signupPassword');
-      updateRequirementItem('reqCapital', capitalValid, 'signupPassword');
-      updateRequirementItem('reqLower', lowerValid, 'signupPassword');
-      updateRequirementItem('reqSpecial', specialValid, 'signupPassword');
-      updateRequirementItem('reqNoSpace', noSpaceValid, 'signupPassword');
-    });
-  }
-
-  const resetPasswordInput = document.getElementById('resetPassword');
-  if (resetPasswordInput) {
-    resetPasswordInput.addEventListener('input', () => {
-      const password = resetPasswordInput.value;
-      const lengthValid = password.length >= 9 && password.length <= 10;
-      const capitalValid = /[A-Z]/.test(password);
-      const lowerValid = /[a-z]/.test(password);
-      const specialValid = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/.test(password);
-      const noSpaceValid = !/\s/.test(password);
-
-      updateRequirementItem('resetReqLength', lengthValid, 'resetPassword');
-      updateRequirementItem('resetReqCapital', capitalValid, 'resetPassword');
-      updateRequirementItem('resetReqLower', lowerValid, 'resetPassword');
-      updateRequirementItem('resetReqSpecial', specialValid, 'resetPassword');
-      updateRequirementItem('resetReqNoSpace', noSpaceValid, 'resetPassword');
-    });
-  }
-}
-
-// Check if already logged in and initialize validation
+// Check if already logged in
 (function() {
   const email = sessionStorage.getItem('user_email');
   if (email) {
     window.location.href = '/dashboard.html';
   }
-  
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initPasswordValidation);
-  } else {
-    initPasswordValidation();
-  }
 })();
-

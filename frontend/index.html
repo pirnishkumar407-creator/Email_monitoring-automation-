@@ -41,14 +41,24 @@
         <div class="form-group">
           <label for="loginEmail">Email Address</label>
           <div class="input-wrapper">
-            <span class="input-icon">@</span>
+            <span class="input-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                <polyline points="22,6 12,13 2,6"/>
+              </svg>
+            </span>
             <input type="email" id="loginEmail" placeholder="you@example.com" required autocomplete="email">
           </div>
         </div>
         <div class="form-group">
           <label for="loginPassword">Password</label>
           <div class="input-wrapper">
-            <span class="input-icon">🔒</span>
+            <span class="input-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+            </span>
             <input type="password" id="loginPassword" placeholder="••••••••" required autocomplete="current-password">
             <button type="button" class="toggle-password" onclick="togglePasswordVisibility('loginPassword', this)" aria-label="Show password">
               <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -72,15 +82,25 @@
         <div class="form-group">
           <label for="signupEmail">Email Address</label>
           <div class="input-wrapper">
-            <span class="input-icon">@</span>
+            <span class="input-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                <polyline points="22,6 12,13 2,6"/>
+              </svg>
+            </span>
             <input type="email" id="signupEmail" placeholder="you@example.com" required autocomplete="email">
           </div>
         </div>
         <div class="form-group">
           <label for="signupPassword">Password</label>
           <div class="input-wrapper">
-            <span class="input-icon">🔒</span>
-            <input type="password" id="signupPassword" placeholder="Password (9-10 chars)" required minlength="9" maxlength="10" autocomplete="new-password">
+            <span class="input-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+            </span>
+            <input type="password" id="signupPassword" placeholder="Password (min 6 chars)" required minlength="6" autocomplete="new-password">
             <button type="button" class="toggle-password" onclick="togglePasswordVisibility('signupPassword', this)" aria-label="Show password">
               <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -88,19 +108,17 @@
               </svg>
             </button>
           </div>
-          <div class="password-requirements" id="passwordRequirements">
-            <div class="requirement-item" id="reqLength"><span class="req-icon">❌</span> 9-10 characters</div>
-            <div class="requirement-item" id="reqCapital"><span class="req-icon">❌</span> At least one capital letter</div>
-            <div class="requirement-item" id="reqLower"><span class="req-icon">❌</span> At least one lowercase letter</div>
-            <div class="requirement-item" id="reqSpecial"><span class="req-icon">❌</span> At least one special character</div>
-            <div class="requirement-item" id="reqNoSpace"><span class="req-icon">❌</span> No spaces allowed</div>
-          </div>
         </div>
         <div class="form-group">
           <label for="confirmPassword">Confirm Password</label>
           <div class="input-wrapper">
-            <span class="input-icon">🔒</span>
-            <input type="password" id="confirmPassword" placeholder="Repeat password" required minlength="9" maxlength="10" autocomplete="new-password">
+            <span class="input-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+            </span>
+            <input type="password" id="confirmPassword" placeholder="Repeat password" required minlength="6" autocomplete="new-password">
             <button type="button" class="toggle-password" onclick="togglePasswordVisibility('confirmPassword', this)" aria-label="Show password">
               <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -120,7 +138,12 @@
         <div class="form-group">
           <label for="forgotEmail">Email Address</label>
           <div class="input-wrapper">
-            <span class="input-icon">@</span>
+            <span class="input-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                <polyline points="22,6 12,13 2,6"/>
+              </svg>
+            </span>
             <input type="email" id="forgotEmail" placeholder="you@example.com" required autocomplete="email">
           </div>
         </div>
@@ -138,7 +161,12 @@
         <div class="form-group">
           <label for="resetEmail">Email Address</label>
           <div class="input-wrapper">
-            <span class="input-icon">@</span>
+            <span class="input-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                <polyline points="22,6 12,13 2,6"/>
+              </svg>
+            </span>
             <input type="email" id="resetEmail" placeholder="you@example.com" required readonly autocomplete="email">
           </div>
         </div>
@@ -152,8 +180,13 @@
         <div class="form-group">
           <label for="resetPassword">New Password</label>
           <div class="input-wrapper">
-            <span class="input-icon">🔒</span>
-            <input type="password" id="resetPassword" placeholder="Password (9-10 chars)" required minlength="9" maxlength="10" autocomplete="new-password">
+            <span class="input-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+            </span>
+            <input type="password" id="resetPassword" placeholder="Password (min 6 chars)" required minlength="6" autocomplete="new-password">
             <button type="button" class="toggle-password" onclick="togglePasswordVisibility('resetPassword', this)" aria-label="Show password">
               <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
@@ -161,19 +194,17 @@
               </svg>
             </button>
           </div>
-          <div class="password-requirements" id="resetPasswordRequirements">
-            <div class="requirement-item" id="resetReqLength"><span class="req-icon">❌</span> 9-10 characters</div>
-            <div class="requirement-item" id="resetReqCapital"><span class="req-icon">❌</span> At least one capital letter</div>
-            <div class="requirement-item" id="resetReqLower"><span class="req-icon">❌</span> At least one lowercase letter</div>
-            <div class="requirement-item" id="resetReqSpecial"><span class="req-icon">❌</span> At least one special character</div>
-            <div class="requirement-item" id="resetReqNoSpace"><span class="req-icon">❌</span> No spaces allowed</div>
-          </div>
         </div>
         <div class="form-group">
           <label for="confirmResetPassword">Confirm New Password</label>
           <div class="input-wrapper">
-            <span class="input-icon">🔒</span>
-            <input type="password" id="confirmResetPassword" placeholder="Repeat password" required minlength="9" maxlength="10" autocomplete="new-password">
+            <span class="input-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+            </span>
+            <input type="password" id="confirmResetPassword" placeholder="Repeat password" required minlength="6" autocomplete="new-password">
             <button type="button" class="toggle-password" onclick="togglePasswordVisibility('confirmResetPassword', this)" aria-label="Show password">
               <svg class="eye-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>

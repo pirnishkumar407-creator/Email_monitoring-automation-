@@ -1,0 +1,22 @@
+{
+  "name": "ai-email-automation",
+  "version": "1.0.0",
+  "description": "AI Email Automation System with Gemini & IMAP/SMTP",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "build": "echo 'Build complete'"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "email",
+    "automation",
+    "gemini-ai",
+    "imap",
+    "smtp"
+  ],
+  "author": "",
+  "license": "ISC"
+}

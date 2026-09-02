@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="AI Email Automation System — Administrator Command Center">
+  <title>Admin Control Center — AI Email Automation</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    /* Admin Specific Styling Enhancements */
+    .admin-badge {
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(6, 182, 212, 0.2));
+      border: 1px solid rgba(99, 102, 241, 0.4);
+      color: #818cf8;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .status-pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+    .admin-stat-card {
+      background: var(--bg-card-solid);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: relative;
+      overflow: hidden;
+      transition: var(--transition);
+    }
+    .admin-stat-card:hover {
+      border-color: var(--border-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    }
+    .admin-stat-card .stat-icon-bg {
+      position: absolute;
+      right: -10px;
+      bottom: -10px;
+      opacity: 0.06;
+      font-size: 5rem;
+      pointer-events: none;
+    }
+    .admin-stat-value {
+      font-size: 2rem;
+      font-weight: 800;
+      color: var(--text-primary);
+      line-height: 1;
+    }
+    .admin-stat-label {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+    .admin-stat-sub {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .role-badge-admin {
+      background: rgba(99, 102, 241, 0.2);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.4);
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .role-badge-user {
+      background: rgba(148, 163, 184, 0.1);
+      color: #94a3b8;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .table-container {
+      background: var(--bg-card-solid);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      margin-top: 15px;
+    }
+    .admin-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.85rem;
+    }
+    .admin-table th {
+      background: rgba(255, 255, 255, 0.03);
+      padding: 14px 16px;
+      color: var(--text-secondary);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.5px;
+    }
+    .admin-table td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-primary);
+    }
+    .admin-table tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .admin-action-btn {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      padding: 6px 10px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 0.75rem;
+      transition: var(--transition);
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .admin-action-btn:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+      border-color: var(--accent);
+    }
+    .admin-action-btn.btn-danger:hover {
+      background: rgba(239, 68, 68, 0.15);
+      color: #fca5a5;
+      border-color: #ef4444;
+    }
+    .admin-action-btn.btn-primary-action {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+    }
+    .admin-action-btn.btn-primary-action:hover {
+      opacity: 0.9;
+    }
+    .cleaner-card {
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), rgba(245, 158, 11, 0.08));
+      border: 1px solid rgba(239, 68, 68, 0.25);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+  </style>
+</head>
+<body class="dashboard-body">
+  <div class="app-layout">
+
+    <!-- ── Sidebar ─────────────────────────────────────────────────── -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-icon" style="background: linear-gradient(135deg, #ef4444, #8b5cf6);">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <div style="display:flex; flex-direction:column;">
+          <span class="brand-text">Admin Center</span>
+          <span style="font-size:0.65rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">System Management</span>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-tab="overview" onclick="switchAdminTab('overview')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          <span>System Overview</span>
+        </button>
+        <button class="nav-item" data-tab="users" onclick="switchAdminTab('users')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>User Accounts</span>
+        </button>
+        <button class="nav-item" data-tab="mailboxes" onclick="switchAdminTab('mailboxes')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+          <span>Mailbox Fleet</span>
+        </button>
+        <button class="nav-item" data-tab="cleaner" onclick="switchAdminTab('cleaner')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+          <span>Inbox Clutter Purge</span>
+        </button>
+        <button class="nav-item" data-tab="ai-settings" onclick="switchAdminTab('ai-settings')">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+          <span>AI Engine & Rules</span>
+        </button>
+        
+        <div style="margin-top:20px; border-top:1px solid var(--border); padding-top:15px;">
+          <a href="/dashboard.html" class="nav-item" style="color:var(--cyan);">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+            <span>User Dashboard</span>
+          </a>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="user-info">
+          <div class="user-avatar" id="adminAvatar" style="background:var(--accent);">AD</div>
+          <div class="user-details">
+            <span class="user-name" id="adminEmail">admin@system</span>
+            <span class="admin-badge"><span class="status-pulse"></span> Super Admin</span>
+          </div>
+        </div>
+        <button class="logout-btn" onclick="handleAdminLogout()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16,17 21,12 16,7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          <span>Logout</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- ── Main Content ────────────────────────────────────────────── -->
+    <main class="main-content">
+
+      <!-- Header -->
+      <header class="main-header">
+        <div class="header-left">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <h2 id="adminPageTitle">System Overview</h2>
+            <span class="admin-badge" id="aiHealthBadge"><span class="status-pulse"></span> AI Engine Online</span>
+          </div>
+          <p id="adminPageSubtitle" class="header-subtitle">Real-time system health, users, and infrastructure oversight</p>
+        </div>
+        <div class="header-right">
+          <button class="header-btn" onclick="testGeminiConnection()" id="btnTestAi" title="Check Gemini AI Status">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            <span>Test AI Health</span>
+          </button>
+          <button class="header-btn btn-run-sync" onclick="triggerAdminSync()" id="btnAdminSync" title="Sync All Mailboxes">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="adminSyncIcon"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            <span id="adminSyncText">Sync Fleet</span>
+          </button>
+          <button class="header-btn" onclick="loadAdminData()" title="Refresh Dashboard">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23,4 23,10 17,10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            <span>Refresh</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- ── Tab: Overview ────────────────────────────────────────── -->
+      <section class="tab-content active" id="tab-overview">
+        <!-- Stats Grid -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:16px; margin-bottom:24px;">
+          <div class="admin-stat-card">
+            <span class="admin-stat-label">Registered Users</span>
+            <span class="admin-stat-value" id="statUsers">0</span>
+            <span class="admin-stat-sub" id="statAdminsSub">0 Administrators</span>
+            <div class="stat-icon-bg">👥</div>
+          </div>
+          <div class="admin-stat-card">
+            <span class="admin-stat-label">Connected Mailboxes</span>
+            <span class="admin-stat-value" id="statMailboxes" style="color:var(--cyan);">0</span>
+            <span class="admin-stat-sub">IMAP & OAuth Fleet</span>
+            <div class="stat-icon-bg">📬</div>
+          </div>
+          <div class="admin-stat-card">
+            <span class="admin-stat-label">Total Emails Processed</span>
+            <span class="admin-stat-value" id="statEmails" style="color:var(--accent);">0</span>
+            <span class="admin-stat-sub" id="statSentSub">0 Dispatched Replies</span>
+            <div class="stat-icon-bg">🤖</div>
+          </div>
+          <div class="admin-stat-card">
+            <span class="admin-stat-label">Pending AI Drafts</span>
+            <span class="admin-stat-value" id="statDrafts" style="color:var(--amber);">0</span>
+            <span class="admin-stat-sub">Awaiting Dispatch/Approval</span>
+            <div class="stat-icon-bg">⏳</div>
+          </div>
+        </div>
+
+        <!-- Charts Grid -->
+        <div style="display:grid; grid-template-columns:2fr 1fr; gap:20px; margin-bottom:24px;">
+          <div style="background:var(--bg-card-solid); border:1px solid var(--border); border-radius:var(--radius); padding:20px;">
+            <h3 style="font-size:1rem; margin-bottom:14px; color:var(--text-primary); display:flex; justify-content:space-between; align-items:center;">
+              <span>Email Activity (Last 7 Days)</span>
+              <span style="font-size:0.75rem; color:var(--text-muted);">System-wide</span>
+            </h3>
+            <div style="height:240px; position:relative;">
+              <canvas id="adminTrafficChart"></canvas>
+            </div>
+          </div>
+          <div style="background:var(--bg-card-solid); border:1px solid var(--border); border-radius:var(--radius); padding:20px;">
+            <h3 style="font-size:1rem; margin-bottom:14px; color:var(--text-primary);">Category Distribution</h3>
+            <div style="height:240px; position:relative;">
+              <canvas id="adminCategoryChart"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Action Banner for Overload Solution -->
+        <div class="cleaner-card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+          <div>
+            <h3 style="color:#f87171; font-size:1.1rem; display:flex; align-items:center; gap:8px;">
+              <span>⚡ Inbox Overload Guard & Junk Auto-Purge</span>
+            </h3>
+            <p style="color:var(--text-secondary); font-size:0.85rem; margin-top:4px;">
+              Receiving too many spam, promotional, or notification emails? Run one-click clutter cleaner to instantly purge junk and free up space.
+            </p>
+          </div>
+          <button class="admin-action-btn btn-primary-action" onclick="switchAdminTab('cleaner')" style="padding:10px 18px; font-size:0.85rem;">
+            <span>Open Clutter Purge Tool</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+      </section>
+
+      <!-- ── Tab: User Accounts ────────────────────────────────────── -->
+      <section class="tab-content" id="tab-users">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+          <div style="display:flex; align-items:center; gap:10px; flex:1; max-width:400px;">
+            <input type="text" id="userSearchInput" oninput="filterUsersList()" placeholder="Search users by email..." style="background:var(--bg-card-solid); border:1px solid var(--border); color:var(--text-primary); padding:8px 14px; border-radius:var(--radius-sm); width:100%; font-size:0.85rem;">
+          </div>
+          <button class="admin-action-btn btn-primary-action" onclick="openAddUserModal()" style="padding:8px 16px; font-size:0.85rem;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            <span>Create New User</span>
+          </button>
+        </div>
+
+        <div class="table-container">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Email Address</th>
+                <th>Role</th>
+                <th>Mailboxes</th>
+                <th>Processed Emails</th>
+                <th>Joined Date</th>
+                <th style="text-align:right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="usersTableBody">
+              <tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:30px;">Loading users...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ── Tab: Mailbox Fleet ────────────────────────────────────── -->
+      <section class="tab-content" id="tab-mailboxes">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+          <p style="color:var(--text-secondary); font-size:0.85rem;">All active IMAP and OAuth mailboxes linked across all user accounts.</p>
+        </div>
+
+        <div class="table-container">
+          <table class="admin-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Mailbox Account</th>
+                <th>Account Owner</th>
+                <th>Protocol / Server</th>
+                <th>Type</th>
+                <th>Connected At</th>
+                <th style="text-align:right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="mailboxesTableBody">
+              <tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:30px;">Loading mailbox fleet...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ── Tab: Clutter Purge (Overload Solution) ────────────────── -->
+      <section class="tab-content" id="tab-cleaner">
+        <div class="cleaner-card">
+          <h3 style="font-size:1.15rem; color:#f87171; margin-bottom:8px; display:flex; align-items:center; gap:8px;">
+            <span>🧹 Inbox Clutter & Junk Auto-Purge (Email Overload Solution)</span>
+          </h3>
+          <p style="color:var(--text-secondary); font-size:0.85rem; margin-bottom:20px; line-height:1.6;">
+            If you are receiving overwhelming volumes of emails, use this tool to immediately delete promotional offers, newsletter digests, and social media notifications from your database.
+          </p>
+
+          <form id="cleanerForm" onsubmit="executeClutterPurge(event)" style="display:flex; flex-direction:column; gap:16px;">
+            <div>
+              <label style="font-size:0.85rem; font-weight:600; color:var(--text-primary); display:block; margin-bottom:8px;">Select Clutter Categories to Purge:</label>
+              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
+                <label style="background:var(--bg-card-solid); border:1px solid var(--border); padding:12px; border-radius:var(--radius-sm); display:flex; align-items:center; gap:10px; cursor:pointer;">
+                  <input type="checkbox" id="cleanSpam" checked style="accent-color:var(--red); width:16px; height:16px;">
+                  <div>
+                    <div style="font-weight:600; font-size:0.85rem; color:var(--text-primary);">🚫 Spam & Social Alerts</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">Junk, notifications, followers</div>
+                  </div>
+                </label>
+                <label style="background:var(--bg-card-solid); border:1px solid var(--border); padding:12px; border-radius:var(--radius-sm); display:flex; align-items:center; gap:10px; cursor:pointer;">
+                  <input type="checkbox" id="cleanPromo" checked style="accent-color:var(--amber); width:16px; height:16px;">
+                  <div>
+                    <div style="font-weight:600; font-size:0.85rem; color:var(--text-primary);">🏷️ Promotional Emails</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">Discounts, marketing, sales</div>
+                  </div>
+                </label>
+                <label style="background:var(--bg-card-solid); border:1px solid var(--border); padding:12px; border-radius:var(--radius-sm); display:flex; align-items:center; gap:10px; cursor:pointer;">
+                  <input type="checkbox" id="cleanNewsletters" checked style="accent-color:var(--blue); width:16px; height:16px;">
+                  <div>
+                    <div style="font-weight:600; font-size:0.85rem; color:var(--text-primary);">📰 Newsletters & Digests</div>
+                    <div style="font-size:0.75rem; color:var(--text-muted);">Medium, Quora, weekly digests</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; max-width:600px;">
+              <div>
+                <label for="cleanAge" style="font-size:0.85rem; font-weight:600; color:var(--text-primary); display:block; margin-bottom:6px;">Time Range:</label>
+                <select id="cleanAge" style="background:var(--bg-card-solid); border:1px solid var(--border); color:var(--text-primary); padding:10px; border-radius:var(--radius-sm); width:100%; font-size:0.85rem;">
+                  <option value="0">All Time (Purge All Matching)</option>
+                  <option value="7">Older than 7 days</option>
+                  <option value="14">Older than 14 days</option>
+                  <option value="30">Older than 30 days</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="margin-top:10px;">
+              <button type="submit" class="admin-action-btn btn-danger" style="padding:12px 24px; font-size:0.9rem; font-weight:600; background:#ef4444; color:white; border-color:#ef4444;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                <span>Execute Clutter Clean</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- ── Tab: AI Engine & Rules ────────────────────────────────── -->
+      <section class="tab-content" id="tab-ai-settings">
+        <div style="background:var(--bg-card-solid); border:1px solid var(--border); border-radius:var(--radius); padding:24px; max-width:800px;">
+          <h3 style="font-size:1.1rem; color:var(--text-primary); margin-bottom:16px;">🤖 Google Gemini AI Engine Configuration</h3>
+          
+          <form id="adminAiForm" onsubmit="saveAdminAiConfig(event)" style="display:flex; flex-direction:column; gap:16px;">
+            <div class="form-group">
+              <label for="adminGeminiKey" style="font-size:0.85rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:6px;">Gemini API Key</label>
+              <div style="display:flex; gap:10px;">
+                <input type="password" id="adminGeminiKey" placeholder="Enter your Google Gemini API Key" style="background:var(--bg-primary); border:1px solid var(--border); color:var(--text-primary); padding:10px; border-radius:var(--radius-sm); flex:1; font-size:0.85rem;">
+                <button type="button" class="admin-action-btn" onclick="testGeminiConnection()">Test Key</button>
+              </div>
+              <small style="color:var(--text-muted); font-size:0.75rem; margin-top:4px; display:block;">Encrypted securely in SQLite with AES-256 before storage.</small>
+            </div>
+
+            <div class="form-group">
+              <label for="adminGeminiModel" style="font-size:0.85rem; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:6px;">Gemini Model Selection</label>
+              <select id="adminGeminiModel" style="background:var(--bg-primary); border:1px solid var(--border); color:var(--text-primary); padding:10px; border-radius:var(--radius-sm); width:100%; font-size:0.85rem;">
+                <option value="gemini-2.0-flash">gemini-2.0-flash (Recommended — Fast & Ultra-Smart)</option>
+                <option value="gemini-2.5-flash">gemini-2.5-flash (State of the art)</option>
+                <option value="gemini-1.5-pro">gemini-1.5-pro (Deep reasoning)</option>
+                <option value="gemini-1.5-flash">gemini-1.5-flash (Balanced)</option>
+                <option value="gemini-flash-lite-latest">gemini-flash-lite-latest (Super fast)</option>
+              </select>
+            </div>
+
+            <div style="border-top:1px solid var(--border); padding-top:16px; margin-top:8px;">
+              <button type="submit" class="admin-action-btn btn-primary-action" style="padding:10px 20px; font-size:0.85rem;">
+                <span>Save AI Configuration</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ── MODALS ──────────────────────────────────────────────────────── -->
+  
+  <!-- Add User Modal -->
+  <div class="modal-overlay" id="addUserModal" style="display:none;">
+    <div class="modal-card" style="max-width:440px;">
+      <div class="modal-header">
+        <h3>Create New User Account</h3>
+        <button class="modal-close" onclick="closeAddUserModal()">&times;</button>
+      </div>
+      <form id="addUserForm" onsubmit="submitAddUser(event)" style="display:flex; flex-direction:column; gap:14px; margin-top:10px;">
+        <div class="form-group">
+          <label for="newEmail" style="display:block; font-size:0.85rem; margin-bottom:4px;">Email Address</label>
+          <input type="email" id="newEmail" required placeholder="user@company.com" style="background:#1a2235; border:1px solid var(--border); color:var(--text-primary); padding:10px; border-radius:var(--radius-sm); width:100%;">
+        </div>
+        <div class="form-group">
+          <label for="newPassword" style="display:block; font-size:0.85rem; margin-bottom:4px;">Password</label>
+          <input type="password" id="newPassword" required minlength="6" placeholder="Min 6 characters" style="background:#1a2235; border:1px solid var(--border); color:var(--text-primary); padding:10px; border-radius:var(--radius-sm); width:100%;">
+        </div>
+        <div class="form-group">
+          <label for="newRole" style="display:block; font-size:0.85rem; margin-bottom:4px;">Account Role</label>
+          <select id="newRole" style="background:#1a2235; border:1px solid var(--border); color:var(--text-primary); padding:10px; border-radius:var(--radius-sm); width:100%;">
+            <option value="user" selected>User (Standard Access)</option>
+            <option value="admin">Administrator (Full Admin Access)</option>
+          </select>
+        </div>
+        <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:10px; margin-top:10px;">
+          <button type="button" class="btn-secondary" onclick="closeAddUserModal()">Cancel</button>
+          <button type="submit" class="btn-primary">Create User</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Reset Password Modal -->
+  <div class="modal-overlay" id="resetPassModal" style="display:none;">
+    <div class="modal-card" style="max-width:400px;">
+      <div class="modal-header">
+        <h3>Reset User Password</h3>
+        <button class="modal-close" onclick="closeResetPassModal()">&times;</button>
+      </div>
+      <form id="resetPassForm" onsubmit="submitResetPass(event)" style="display:flex; flex-direction:column; gap:14px; margin-top:10px;">
+        <input type="hidden" id="resetUserId">
+        <p style="font-size:0.85rem; color:var(--text-secondary);" id="resetUserEmailText">Set a new password for user.</p>
+        <div class="form-group">
+          <label for="resetNewPass" style="display:block; font-size:0.85rem; margin-bottom:4px;">New Password</label>
+          <input type="password" id="resetNewPass" required minlength="6" placeholder="Minimum 6 characters" style="background:#1a2235; border:1px solid var(--border); color:var(--text-primary); padding:10px; border-radius:var(--radius-sm); width:100%;">
+        </div>
+        <div class="modal-actions" style="display:flex; justify-content:flex-end; gap:10px; margin-top:10px;">
+          <button type="button" class="btn-secondary" onclick="closeResetPassModal()">Cancel</button>
+          <button type="submit" class="btn-primary">Update Password</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/js/admin.js"></script>
+</body>
+</html>

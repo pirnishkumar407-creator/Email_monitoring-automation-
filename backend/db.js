@@ -79,6 +79,8 @@ function decrypt(text) {
 
 // Initialize SQLite database
 const db = new DatabaseSync(DB_FILE);
+db.exec('PRAGMA journal_mode = WAL;');
+db.exec('PRAGMA busy_timeout = 5000;');
 
 // ── Schema ──────────────────────────────────────────────────────────────────
 
@@ -117,6 +119,14 @@ db.exec(`
     UNIQUE(user_id, email)
   )
 `);
+
+// Migration: Add OAuth columns
+try {
+  db.exec(`ALTER TABLE imap_accounts ADD COLUMN auth_type TEXT DEFAULT 'password'`);
+} catch (e) { /* Column already exists */ }
+try {
+  db.exec(`ALTER TABLE imap_accounts ADD COLUMN oauth_refresh_token TEXT`);
+} catch (e) { /* Column already exists */ }
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS emails (
@@ -246,15 +256,44 @@ const stmts = {
   getUserByEmail: db.prepare(`SELECT * FROM users WHERE email = ?`),
   getUserById: db.prepare(`SELECT id, email, role, imap_server, imap_user, imap_password, created_at FROM users WHERE id = ?`),
   getAllUsers: db.prepare(`SELECT id, email, role, created_at FROM users ORDER BY created_at DESC`),
+  getAllUsersDetailed: db.prepare(`
+    SELECT 
+      u.id, 
+      u.email, 
+      u.role, 
+      u.created_at,
+      (SELECT COUNT(*) FROM imap_accounts WHERE user_id = u.id) as mailbox_count,
+      (SELECT COUNT(*) FROM emails WHERE user_id = u.id) as email_count
+    FROM users u 
+    ORDER BY u.created_at DESC
+  `),
+  countAdmins: db.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'admin'`),
+  updateUserRole: db.prepare(`UPDATE users SET role = ? WHERE id = ?`),
   deleteUser: db.prepare(`DELETE FROM users WHERE id = ? AND role != 'admin'`),
+  deleteUserAny: db.prepare(`DELETE FROM users WHERE id = ?`),
   updateUserImap: db.prepare(`UPDATE users SET imap_server = ?, imap_user = ?, imap_password = ? WHERE id = ?`),
   updateUserResetToken: db.prepare(`UPDATE users SET reset_token = ? WHERE id = ?`),
   updateUserPassword: db.prepare(`UPDATE users SET password_hash = ?, salt = ?, reset_token = NULL WHERE id = ?`),
 
   // IMAP Accounts
-  getImapAccountsByUser: db.prepare(`SELECT id, email, imap_server, imap_port, imap_user, imap_password, created_at FROM imap_accounts WHERE user_id = ?`),
+  getImapAccountsByUser: db.prepare(`SELECT id, user_id, email, imap_server, imap_port, imap_user, imap_password, auth_type, created_at FROM imap_accounts WHERE user_id = ?`),
   getImapAccountById: db.prepare(`SELECT * FROM imap_accounts WHERE id = ?`),
   getAllImapAccounts: db.prepare(`SELECT * FROM imap_accounts ORDER BY created_at DESC`),
+  getAllMailboxesDetailed: db.prepare(`
+    SELECT 
+      a.id, 
+      a.user_id, 
+      a.email, 
+      a.imap_server, 
+      a.imap_port, 
+      a.imap_user, 
+      a.auth_type, 
+      a.created_at,
+      u.email as user_email
+    FROM imap_accounts a
+    LEFT JOIN users u ON a.user_id = u.id
+    ORDER BY a.created_at DESC
+  `),
   insertImapAccount: db.prepare(`INSERT INTO imap_accounts (user_id, email, imap_server, imap_port, imap_user, imap_password, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`),
   updateImapAccount: db.prepare(`UPDATE imap_accounts SET imap_server = ?, imap_user = ?, imap_password = ? WHERE id = ?`),
   deleteImapAccount: db.prepare(`DELETE FROM imap_accounts WHERE id = ? AND user_id = ?`),
@@ -270,7 +309,11 @@ const stmts = {
   getEmailById: db.prepare(`SELECT * FROM emails WHERE id = ?`),
   updateEmailStatus: db.prepare(`UPDATE emails SET status = ? WHERE id = ?`),
   updateEmailDraft: db.prepare(`UPDATE emails SET draft_reply = ?, status = 'Pending', edited_at = ?, send_at = ? WHERE id = ?`),
+  deleteEmailByUser: db.prepare(`DELETE FROM emails WHERE id = ? AND user_id = ?`),
+  deleteEmailAdmin: db.prepare(`DELETE FROM emails WHERE id = ?`),
+  deleteTasksByEmail: db.prepare(`DELETE FROM tasks WHERE email_id = ?`),
   getPendingAutoSend: db.prepare(`SELECT * FROM emails WHERE status = 'Pending' AND send_at IS NOT NULL AND send_at <= ?`),
+
   getStats: db.prepare(`
     SELECT
       COUNT(*) as total,
@@ -279,6 +322,18 @@ const stmts = {
       SUM(CASE WHEN status IN ('Sent', 'Auto-Sent', 'Approved') THEN 1 ELSE 0 END) as sent
     FROM emails
   `),
+  getAdminOverview: db.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM users) as total_users,
+      (SELECT COUNT(*) FROM users WHERE role = 'admin') as total_admins,
+      (SELECT COUNT(*) FROM imap_accounts) as total_mailboxes,
+      (SELECT COUNT(*) FROM emails) as total_emails,
+      (SELECT COUNT(*) FROM emails WHERE status IN ('Sent', 'Auto-Sent', 'Approved')) as total_sent,
+      (SELECT COUNT(*) FROM emails WHERE status = 'Pending' AND draft_reply IS NOT NULL) as total_drafts,
+      (SELECT COUNT(*) FROM tasks) as total_tasks,
+      (SELECT COUNT(*) FROM sessions) as active_sessions
+  `),
+
   getStatsByUser: db.prepare(`
     SELECT
       COUNT(*) as total,

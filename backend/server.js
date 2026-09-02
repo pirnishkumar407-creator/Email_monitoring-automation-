@@ -15,6 +15,12 @@ for (const key in envVars) {
 
 const PORT = 3000;
 
+// ── Google OAuth 2.0 Configuration ──────────────────────────────────────────
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+const GOOGLE_REDIRECT_URI = `http://localhost:${PORT}/auth/google/callback`;
+const GOOGLE_SCOPES = 'https://mail.google.com/ https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile openid';
+
 // Helper to automatically configure IMAP based on email domain
 function autoConfigureImap(userId, email, password) {
   try {
@@ -114,6 +120,12 @@ function checkAutoSend() {
           smtpPass = decrypt(senderUser.imap_password);
         }
       }
+      let authType = (account && account.auth_type) || 'password';
+      let oauthRefreshToken = null;
+      if (account && authType === 'oauth' && account.oauth_refresh_token) {
+        oauthRefreshToken = decrypt(account.oauth_refresh_token);
+      }
+
       // Spawn send_email.py
       const { spawn } = require('child_process');
       const child = spawn('python', [path.join(__dirname, 'send_email.py')]);
@@ -123,7 +135,9 @@ function checkAutoSend() {
         body: email.draft_reply,
         smtp_server: smtpServer,
         smtp_user: smtpUser,
-        smtp_pass: smtpPass
+        smtp_pass: smtpPass,
+        auth_type: authType,
+        oauth_refresh_token: oauthRefreshToken
       });
       child.stdin.write(payload);
       child.stdin.end();
@@ -132,17 +146,69 @@ function checkAutoSend() {
           stmts.updateEmailStatus.run('Auto-Sent', email.id);
           console.log(`[Auto-Send] Email ${email.id} auto-sent to ${email.sender}`);
         } else {
-          console.error(`[Auto-Send] Failed to send email ${email.id}`);
+          stmts.updateEmailStatus.run('Failed', email.id);
+          console.error(`[Auto-Send] Failed to send email ${email.id} (status updated to Failed)`);
         }
       });
+
     }
   } catch (err) {
     console.error('[Auto-Send Error]', err.message);
   }
 }
 
-// Check every 60 seconds
+// Auto-send timer: Check every 60 seconds
 setInterval(checkAutoSend, 60000);
+
+// Auto-sync timer: Live background email monitoring (checks every 60s)
+let isAgentSyncing = false;
+let lastSyncTimestamp = new Date().toISOString();
+let lastSyncStatus = 'idle';
+
+function autoSyncEmails() {
+  if (isAgentSyncing) return;
+  isAgentSyncing = true;
+  lastSyncStatus = 'syncing';
+  const { spawn } = require('child_process');
+  const child = spawn('python', [path.join(__dirname, 'agent.py')], {
+    env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
+  });
+
+  let output = '';
+  if (child.stdout) child.stdout.on('data', d => { output += d; });
+  if (child.stderr) child.stderr.on('data', d => { output += d; });
+
+  // Give the full Gmail IMAP + Gemini API cycle time to complete (90s)
+  const timeoutId = setTimeout(() => {
+    try { child.kill(); } catch (_) {}
+    isAgentSyncing = false;
+    lastSyncStatus = 'timeout';
+    lastSyncTimestamp = new Date().toISOString();
+    console.log('[Auto-Sync] Agent timed out after 90s');
+  }, 90000);
+
+  child.on('close', (code) => {
+    clearTimeout(timeoutId);
+    isAgentSyncing = false;
+    lastSyncTimestamp = new Date().toISOString();
+    lastSyncStatus = code === 0 ? 'ok' : 'error';
+    if (code !== 0) {
+      console.log('[Auto-Sync] Agent exited with code', code, output.slice(-300));
+    }
+  });
+  child.on('error', (err) => {
+    clearTimeout(timeoutId);
+    isAgentSyncing = false;
+    lastSyncStatus = 'error';
+    console.error('[Auto-Sync Error]', err.message);
+  });
+}
+// Run every 60 seconds for live background inbox monitoring
+setInterval(autoSyncEmails, 60000);
+// Also run once immediately on server start after 5 seconds
+setTimeout(autoSyncEmails, 5000);
+
+
 
 // ── Content Types Map ───────────────────────────────────────────────────────
 const MIME = {
@@ -168,14 +234,10 @@ const server = http.createServer(async (req, res) => {
       const { email, password } = await parseJsonBody(req);
       if (!email || !password) return json(res, 400, { success: false, message: 'Email and password are required.' });
       if (!/^\S+@\S+\.\S+$/.test(email)) return json(res, 400, { success: false, message: 'Invalid email address.' });
-      const hasUpper = /[A-Z]/.test(password);
-      const hasLower = /[a-z]/.test(password);
-      const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/.test(password);
-      const hasSpace = /\s/.test(password);
-      if (password.length < 9 || password.length > 10 || !hasUpper || !hasLower || !hasSpecial || hasSpace) {
+      if (password.length < 6) {
         return json(res, 400, {
           success: false,
-          message: 'Password must be 9-10 characters long, and contain at least one uppercase letter, one lowercase letter, one special character, and no spaces.'
+          message: 'Password must be at least 6 characters long.'
         });
       }
 
@@ -279,14 +341,10 @@ const server = http.createServer(async (req, res) => {
       if (!user) return json(res, 404, { success: false, message: 'This email is not registered.' });
 
       // Validate password complexity
-      const hasUpper = /[A-Z]/.test(password);
-      const hasLower = /[a-z]/.test(password);
-      const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/.test(password);
-      const hasSpace = /\s/.test(password);
-      if (password.length < 9 || password.length > 10 || !hasUpper || !hasLower || !hasSpecial || hasSpace) {
+      if (password.length < 6) {
         return json(res, 400, {
           success: false,
-          message: 'Password must be 9-10 characters long, and contain at least one uppercase letter, one lowercase letter, one special character, and no spaces.'
+          message: 'Password must be at least 6 characters long.'
         });
       }
 
@@ -321,14 +379,122 @@ const server = http.createServer(async (req, res) => {
   }
 
 
+  // ── API: Admin Overview & System Stats ──────────────────────────────────
+  if (url.pathname === '/api/admin/overview' && method === 'GET') {
+    const user = getAuthUser(req);
+    if (!user || user.role !== 'admin') return json(res, 403, { success: false, message: 'Admin access required.' });
+    try {
+      const stats = stmts.getAdminOverview.get();
+      const byCategory = stmts.getEmailsByCategory.all();
+      const byPriority = stmts.getEmailsByPriority.all();
+      const byDay = stmts.getEmailsByDay.all();
+
+      const db_key_raw = stmts.getSetting.get('gemini_api_key')?.value;
+      const db_key = db_key_raw ? decrypt(db_key_raw) : null;
+      const env_key = process.env.GEMINI_API_KEY;
+      const hasApiKey = Boolean((db_key && !db_key.startsWith('test-key') && !db_key.startsWith('•••')) || (env_key && env_key !== 'your_gemini_api_key_here'));
+      const activeModel = stmts.getSetting.get('gemini_model')?.value || process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+
+      return json(res, 200, {
+        success: true,
+        overview: {
+          ...stats,
+          ai_configured: hasApiKey,
+          gemini_model: activeModel,
+          byCategory,
+          byPriority,
+          byDay
+        }
+      });
+    } catch (err) {
+      console.error('Admin overview error:', err);
+      return json(res, 500, { success: false, message: 'Internal server error.' });
+    }
+  }
+
   // ── API: Get All Users (Admin only) ─────────────────────────────────────
   if (url.pathname === '/api/users' && method === 'GET') {
     const user = getAuthUser(req);
     if (!user || user.role !== 'admin') return json(res, 403, { success: false, message: 'Admin access required.' });
     try {
-      const users = stmts.getAllUsers.all();
+      const users = stmts.getAllUsersDetailed.all();
       return json(res, 200, { success: true, users });
     } catch (err) {
+      console.error('Get users error:', err);
+      return json(res, 500, { success: false, message: 'Internal server error.' });
+    }
+  }
+
+  // ── API: Create User (Admin only) ───────────────────────────────────────
+  if (url.pathname === '/api/users' && method === 'POST') {
+    const user = getAuthUser(req);
+    if (!user || user.role !== 'admin') return json(res, 403, { success: false, message: 'Admin access required.' });
+    try {
+      const { email, password, role } = await parseJsonBody(req);
+      if (!email || !password) return json(res, 400, { success: false, message: 'Email and password are required.' });
+      if (!/^\S+@\S+\.\S+$/.test(email)) return json(res, 400, { success: false, message: 'Invalid email address format.' });
+      if (password.length < 6) return json(res, 400, { success: false, message: 'Password must be at least 6 characters.' });
+
+      const existing = stmts.getUserByEmail.get(email.toLowerCase().trim());
+      if (existing) return json(res, 409, { success: false, message: 'A user with this email already exists.' });
+
+      const assignedRole = (role === 'admin') ? 'admin' : 'user';
+      createUser(email, password, assignedRole);
+      return json(res, 201, { success: true, message: `User ${email} created successfully as ${assignedRole}!` });
+    } catch (err) {
+      console.error('Admin create user error:', err);
+      return json(res, 500, { success: false, message: 'Internal server error.' });
+    }
+  }
+
+  // ── API: Update User Role (Admin only) ──────────────────────────────────
+  if (url.pathname.match(/^\/api\/users\/\d+\/role$/) && method === 'PUT') {
+    const user = getAuthUser(req);
+    if (!user || user.role !== 'admin') return json(res, 403, { success: false, message: 'Admin access required.' });
+    try {
+      const id = parseInt(url.pathname.split('/')[3], 10);
+      const { role } = await parseJsonBody(req);
+      if (role !== 'admin' && role !== 'user') return json(res, 400, { success: false, message: 'Role must be "admin" or "user".' });
+
+      const targetUser = stmts.getUserById.get(id);
+      if (!targetUser) return json(res, 404, { success: false, message: 'User not found.' });
+
+      if (targetUser.role === 'admin' && role === 'user') {
+        const adminCount = stmts.countAdmins.get().count;
+        if (adminCount <= 1) {
+          return json(res, 400, { success: false, message: 'Cannot demote the only administrator.' });
+        }
+      }
+
+      stmts.updateUserRole.run(role, id);
+      return json(res, 200, { success: true, message: `User role updated to ${role}.` });
+    } catch (err) {
+      console.error('Update role error:', err);
+      return json(res, 500, { success: false, message: 'Internal server error.' });
+    }
+  }
+
+  // ── API: Reset User Password by Admin ───────────────────────────────────
+  if (url.pathname.match(/^\/api\/users\/\d+\/password$/) && method === 'PUT') {
+    const user = getAuthUser(req);
+    if (!user || user.role !== 'admin') return json(res, 403, { success: false, message: 'Admin access required.' });
+    try {
+      const id = parseInt(url.pathname.split('/')[3], 10);
+      const { password } = await parseJsonBody(req);
+      if (!password || password.length < 6) {
+        return json(res, 400, { success: false, message: 'Password must be at least 6 characters long.' });
+      }
+
+      const targetUser = stmts.getUserById.get(id);
+      if (!targetUser) return json(res, 404, { success: false, message: 'User not found.' });
+
+      const salt = crypto.randomBytes(16).toString('hex');
+      const hash = hashPassword(password, salt);
+      stmts.updateUserPassword.run(hash, salt, id);
+
+      return json(res, 200, { success: true, message: `Password for ${targetUser.email} has been updated!` });
+    } catch (err) {
+      console.error('Admin reset password error:', err);
       return json(res, 500, { success: false, message: 'Internal server error.' });
     }
   }
@@ -339,10 +505,100 @@ const server = http.createServer(async (req, res) => {
     if (!user || user.role !== 'admin') return json(res, 403, { success: false, message: 'Admin access required.' });
     try {
       const id = parseInt(url.pathname.split('/').pop(), 10);
-      stmts.deleteUser.run(id);
-      return json(res, 200, { success: true, message: 'User deleted.' });
+      if (id === user.id) {
+        return json(res, 400, { success: false, message: 'You cannot delete your own admin account while logged in.' });
+      }
+      const targetUser = stmts.getUserById.get(id);
+      if (!targetUser) return json(res, 404, { success: false, message: 'User not found.' });
+
+      // Clean up user's related data
+      db.prepare(`DELETE FROM sessions WHERE user_id = ?`).run(id);
+      db.prepare(`DELETE FROM tasks WHERE user_id = ?`).run(id);
+      db.prepare(`DELETE FROM emails WHERE user_id = ?`).run(id);
+      db.prepare(`DELETE FROM imap_accounts WHERE user_id = ?`).run(id);
+      stmts.deleteUserAny.run(id);
+
+      return json(res, 200, { success: true, message: `User ${targetUser.email} and associated data deleted.` });
     } catch (err) {
+      console.error('Delete user error:', err);
       return json(res, 500, { success: false, message: 'Internal server error.' });
+    }
+  }
+
+  // ── API: Admin Mailbox Fleet Oversight ──────────────────────────────────
+  if (url.pathname === '/api/admin/mailboxes' && method === 'GET') {
+    const user = getAuthUser(req);
+    if (!user || user.role !== 'admin') return json(res, 403, { success: false, message: 'Admin access required.' });
+    try {
+      const mailboxes = stmts.getAllMailboxesDetailed.all();
+      mailboxes.forEach(m => {
+        m.imap_password = m.imap_password ? '••••••••' : '';
+      });
+      return json(res, 200, { success: true, mailboxes });
+    } catch (err) {
+      console.error('Admin get mailboxes error:', err);
+      return json(res, 500, { success: false, message: 'Internal server error.' });
+    }
+  }
+
+  if (url.pathname.match(/^\/api\/admin\/mailboxes\/\d+$/) && method === 'DELETE') {
+    const user = getAuthUser(req);
+    if (!user || user.role !== 'admin') return json(res, 403, { success: false, message: 'Admin access required.' });
+    try {
+      const id = parseInt(url.pathname.split('/').pop(), 10);
+      stmts.deleteImapAccountAdmin.run(id);
+      return json(res, 200, { success: true, message: 'Mailbox disconnected from fleet.' });
+    } catch (err) {
+      console.error('Admin delete mailbox error:', err);
+      return json(res, 500, { success: false, message: 'Internal server error.' });
+    }
+  }
+
+  // ── API: Test Gemini Connectivity ───────────────────────────────────────
+  if (url.pathname === '/api/admin/test-gemini' && method === 'POST') {
+    const user = getAuthUser(req);
+    if (!user || user.role !== 'admin') return json(res, 403, { success: false, message: 'Admin access required.' });
+    try {
+      const { apiKey, model } = await parseJsonBody(req);
+      const db_key_raw = stmts.getSetting.get('gemini_api_key')?.value;
+      const db_key = db_key_raw ? decrypt(db_key_raw) : null;
+      const keyToUse = (apiKey && !apiKey.startsWith('••••') && apiKey.trim() !== '') ? apiKey.trim() : (db_key || process.env.GEMINI_API_KEY);
+      const modelToUse = model || stmts.getSetting.get('gemini_model')?.value || process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+
+      if (!keyToUse || keyToUse === 'your_gemini_api_key_here') {
+        return json(res, 400, { success: false, message: 'No valid Gemini API key found to test.' });
+      }
+
+      const start = Date.now();
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelToUse}:generateContent?key=${keyToUse}`;
+      const resp = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'Respond with the single word "OK" only.' }] }]
+        })
+      });
+
+      const durationMs = Date.now() - start;
+
+      if (!resp.ok) {
+        const errTxt = await resp.text();
+        return json(res, 400, { success: false, message: `Gemini API Error (${resp.status}): ${errTxt}` });
+      }
+
+      const data = await resp.json();
+      const reply = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || 'Connected';
+
+      return json(res, 200, {
+        success: true,
+        message: `Gemini AI is healthy & responding! Latency: ${durationMs}ms`,
+        model: modelToUse,
+        latencyMs: durationMs,
+        response: reply
+      });
+    } catch (err) {
+      console.error('Test Gemini error:', err);
+      return json(res, 500, { success: false, message: 'Failed to test Gemini: ' + err.message });
     }
   }
 
@@ -361,6 +617,34 @@ const server = http.createServer(async (req, res) => {
       return json(res, 500, { success: false, message: 'Internal server error.' });
     }
   }
+
+  // ── API: Live Monitoring Status ─────────────────────────────────────────
+  if (url.pathname === '/api/monitoring/status' && method === 'GET') {
+    const user = getAuthUser(req);
+    if (!user) return json(res, 401, { success: false, message: 'Authentication required.' });
+    try {
+      const userAccounts = user.role === 'admin' 
+        ? db.prepare(`SELECT COUNT(*) as count FROM imap_accounts`).get().count
+        : stmts.getImapAccountsByUser.all(user.id).length;
+
+      // Calculate how many seconds since last successful sync
+      const secsSinceSync = Math.floor((Date.now() - new Date(lastSyncTimestamp).getTime()) / 1000);
+
+      return json(res, 200, {
+        success: true,
+        isSyncing: isAgentSyncing,
+        lastSyncTimestamp: lastSyncTimestamp,
+        lastSyncStatus: lastSyncStatus,
+        secsSinceLastSync: secsSinceSync,
+        accountsCount: userAccounts,
+        // connected = has accounts + last sync was within 3 minutes
+        isConnected: userAccounts > 0 && secsSinceSync < 180
+      });
+    } catch (err) {
+      return json(res, 500, { success: false, message: err.message });
+    }
+  }
+
 
   // ── API: Run Email Sync / Agent Simulation ──────────────────────────────
   if (url.pathname === '/api/run-agent' && method === 'POST') {
@@ -383,11 +667,12 @@ const server = http.createServer(async (req, res) => {
       }
 
       // Check if we should spawn in simulation mode or real sync mode
-      const args = [];
+      const args = [`--user-id`, `${user.id}`];
       if (!hasImap) {
         args.push('--simulate');
       }
 
+      isAgentSyncing = true;
       const child = spawn('python', [path.join(__dirname, 'agent.py'), ...args]);
       let stdout = '', stderr = '';
       
@@ -395,6 +680,8 @@ const server = http.createServer(async (req, res) => {
       child.stderr.on('data', d => { stderr += d; });
 
       child.on('close', code => {
+        isAgentSyncing = false;
+        lastSyncTimestamp = new Date().toISOString();
         if (code === 0) {
           return json(res, 200, { 
             success: true, 
@@ -407,12 +694,18 @@ const server = http.createServer(async (req, res) => {
           return json(res, 502, { success: false, message: `Email sync failed: ${stderr || stdout}` });
         }
       });
+      child.on('error', (err) => {
+        isAgentSyncing = false;
+        return json(res, 500, { success: false, message: err.message });
+      });
       return;
     } catch (err) {
+      isAgentSyncing = false;
       console.error('Run agent endpoint error:', err);
       return json(res, 500, { success: false, message: 'Internal server error.' });
     }
   }
+
 
   // ── API: Approve Email Draft ────────────────────────────────────────────
   if (url.pathname.match(/^\/api\/emails\/\d+\/approve$/) && method === 'POST') {
@@ -440,6 +733,12 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
+      let authType = (account && account.auth_type) || 'password';
+      let oauthRefreshToken = null;
+      if (account && authType === 'oauth' && account.oauth_refresh_token) {
+        oauthRefreshToken = decrypt(account.oauth_refresh_token);
+      }
+
       const { spawn } = require('child_process');
       const child = spawn('python', [path.join(__dirname, 'send_email.py')]);
       let stdout = '', stderr = '';
@@ -459,7 +758,9 @@ const server = http.createServer(async (req, res) => {
         body: email.draft_reply,
         smtp_server: smtpServer,
         smtp_user: smtpUser,
-        smtp_pass: smtpPass
+        smtp_pass: smtpPass,
+        auth_type: authType,
+        oauth_refresh_token: oauthRefreshToken
       });
       child.stdin.write(payload);
       child.stdin.end();
@@ -508,6 +809,85 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // ── API: Toggle Auto-Send for Email ─────────────────────────────────────
+  if (url.pathname.match(/^\/api\/emails\/\d+\/toggle-autosend$/) && method === 'POST') {
+    const user = getAuthUser(req);
+    if (!user) return json(res, 401, { success: false, message: 'Authentication required.' });
+    try {
+      const id = parseInt(url.pathname.split('/')[3], 10);
+      const email = stmts.getEmailById.get(id);
+      if (!email) return json(res, 404, { success: false, message: 'Email not found.' });
+
+      let newSendAt = null;
+      let message = '';
+      if (email.send_at && new Date(email.send_at) > new Date()) {
+        // Pause/Disable auto-send
+        newSendAt = null;
+        message = 'Auto-send paused. This email will not be sent automatically.';
+      } else {
+        // Schedule auto-send (default: 20 minutes)
+        newSendAt = new Date(Date.now() + 20 * 60 * 1000).toISOString();
+        message = 'Auto-send scheduled for dispatch in 20 minutes.';
+      }
+
+      db.prepare(`UPDATE emails SET send_at = ? WHERE id = ?`).run(newSendAt, id);
+      return json(res, 200, { success: true, send_at: newSendAt, message });
+    } catch (err) {
+      console.error('Toggle autosend error:', err);
+      return json(res, 500, { success: false, message: 'Internal server error.' });
+    }
+  }
+
+  // ── API: Delete Single Email ────────────────────────────────────────────
+  if (url.pathname.match(/^\/api\/emails\/\d+$/) && method === 'DELETE') {
+    const user = getAuthUser(req);
+    if (!user) return json(res, 401, { success: false, message: 'Authentication required.' });
+    try {
+      const id = parseInt(url.pathname.split('/')[3], 10);
+      stmts.deleteTasksByEmail.run(id);
+      if (user.role === 'admin') {
+        stmts.deleteEmailAdmin.run(id);
+      } else {
+        stmts.deleteEmailByUser.run(id, user.id);
+      }
+      return json(res, 200, { success: true, message: 'Email deleted successfully.' });
+    } catch (err) {
+      console.error('Delete email error:', err);
+      return json(res, 500, { success: false, message: 'Internal server error.' });
+    }
+  }
+
+  // ── API: Clean Junk / Spam / Automated Test Mails ───────────────────────
+  if (url.pathname === '/api/emails/clean-junk' && method === 'POST') {
+    const user = getAuthUser(req);
+    if (!user) return json(res, 401, { success: false, message: 'Authentication required.' });
+    try {
+      const condition = user.role === 'admin' ? '' : `AND user_id = ${user.id}`;
+      // Clean spam, promotional clutter, delivery notification failures, and password reset loops
+      const query = `
+        DELETE FROM emails 
+        WHERE (
+          category IN ('spam', 'promotion') 
+          OR sender LIKE '%mailer-daemon%' 
+          OR sender LIKE '%no-reply%' 
+          OR sender LIKE '%noreply%' 
+          OR subject LIKE '%Password Reset OTP%'
+          OR subject LIKE '%Delivery Status Notification%'
+        ) ${condition}
+      `;
+      const result = db.prepare(query).run();
+      return json(res, 200, { 
+        success: true, 
+        deletedCount: result.changes, 
+        message: `Successfully cleaned ${result.changes} junk and automated test email(s).` 
+      });
+    } catch (err) {
+      console.error('Clean junk error:', err);
+      return json(res, 500, { success: false, message: 'Internal server error.' });
+    }
+  }
+
+
   // ── API: Dashboard Stats ────────────────────────────────────────────────
   if (url.pathname === '/api/stats' && method === 'GET') {
     const user = getAuthUser(req);
@@ -532,6 +912,7 @@ const server = http.createServer(async (req, res) => {
       const byCategory = stmts.getEmailsByCategory.all();
       const byPriority = stmts.getEmailsByPriority.all();
       const responseRate = stmts.getResponseRate.get();
+
       return json(res, 200, {
         success: true,
         analytics: {
@@ -550,6 +931,22 @@ const server = http.createServer(async (req, res) => {
     if (!user) return json(res, 401, { success: false, message: 'Authentication required.' });
     try {
       const settings = {};
+      
+      // Auto-reply rule keys (shared)
+      const ruleKeys = [
+        'rule_master_autoreply',
+        'rule_delay_mins',
+        'rule_reply_important',
+        'rule_reply_promotion',
+        'rule_reply_newsletter',
+        'rule_reply_spam'
+      ];
+
+      ruleKeys.forEach(k => {
+        const row = stmts.getSetting.get(k);
+        settings[k] = row ? row.value : null;
+      });
+
       if (user.role === 'admin') {
         // Admin sees global settings
         const keys = ['gemini_api_key', 'gemini_model', 'imap_server', 'imap_port', 'imap_user', 'imap_password'];
@@ -582,8 +979,25 @@ const server = http.createServer(async (req, res) => {
       const body = await parseJsonBody(req);
       const s = body.settings || {};
 
+      // Save auto-reply rules (allowed for all users)
+      const allowedRuleKeys = [
+        'rule_master_autoreply',
+        'rule_delay_mins',
+        'rule_reply_important',
+        'rule_reply_promotion',
+        'rule_reply_newsletter',
+        'rule_reply_spam'
+      ];
+      
+      allowedRuleKeys.forEach(k => {
+        if (s[k] !== undefined && s[k] !== null) {
+          stmts.setSetting.run(k, String(s[k]));
+        }
+      });
+
       if (user.role === 'admin') {
         Object.keys(s).forEach(k => {
+          if (allowedRuleKeys.includes(k)) return;
           const val = s[k];
           if (val !== undefined && val !== null && typeof val === 'string' && !val.startsWith('•••')) {
             const finalVal = (k === 'imap_password' || k === 'gemini_api_key') ? encrypt(val) : val;
@@ -597,7 +1011,7 @@ const server = http.createServer(async (req, res) => {
           stmts.updateUserImap.run(s.imap_server, s.imap_user || '', encPassword, user.id);
         }
       }
-      return json(res, 200, { success: true, message: 'Settings saved!' });
+      return json(res, 200, { success: true, message: 'Settings and auto-reply rules saved!' });
     } catch (err) {
       return json(res, 500, { success: false, message: 'Internal server error.' });
     }
@@ -692,16 +1106,15 @@ const server = http.createServer(async (req, res) => {
       }
 
       const { imap_server, imap_user, imap_password } = await parseJsonBody(req);
-      if (!imap_server || !imap_user) {
-        return json(res, 400, { success: false, message: 'Server and username are required.' });
-      }
+      const server = imap_server || account.imap_server;
+      const username = imap_user || account.imap_user;
 
       let finalPassword = account.imap_password;
-      if (imap_password && !imap_password.startsWith('•••')) {
+      if (imap_password && !imap_password.startsWith('•••') && imap_password.trim() !== '') {
         finalPassword = encrypt(imap_password);
       }
 
-      stmts.updateImapAccount.run(imap_server, imap_user, finalPassword, id);
+      stmts.updateImapAccount.run(server, username, finalPassword, id);
       return json(res, 200, { success: true, message: 'Connection settings updated!' });
     } catch (err) {
       console.error('Update IMAP account error:', err);
@@ -799,7 +1212,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const id = parseInt(url.pathname.split('/').pop(), 10);
       const { title, description, status, priority, due_date } = await parseJsonBody(req);
-      stmts.updateTask.run(title, description, status, priority, due_date, id);
+      stmts.updateTask.run(title || 'Untitled Task', description || '', status || 'To Do', priority || 'Medium', due_date || null, id);
       return json(res, 200, { success: true, message: 'Task updated.' });
     } catch (err) {
       console.error('Update task error:', err);
@@ -880,7 +1293,30 @@ Return ONLY the email content (subject line and email body). Do not include any 
         return json(res, 400, { success: false, message: 'Recipient, subject, and body are required.' });
       }
 
+      // Resolve user's mailbox account
+      const userAccounts = stmts.getImapAccountsByUser.all(user.id);
+      const account = userAccounts && userAccounts.length > 0 ? userAccounts[0] : null;
       const senderUser = stmts.getUserById.get(user.id);
+
+      let smtpServer = 'smtp.gmail.com';
+      let smtpUser = (account && account.email) || (senderUser && senderUser.email) || user.email;
+      let smtpPass = null;
+      let authType = (account && account.auth_type) || 'password';
+      let oauthRefreshToken = null;
+
+      if (account) {
+        smtpServer = account.imap_server ? account.imap_server.replace('imap.', 'smtp.') : 'smtp.gmail.com';
+        if (authType === 'oauth' && account.oauth_refresh_token) {
+          oauthRefreshToken = decrypt(account.oauth_refresh_token);
+        } else if (account.imap_password) {
+          smtpPass = decrypt(account.imap_password);
+        }
+      } else if (senderUser) {
+        if (senderUser.imap_server) smtpServer = senderUser.imap_server.replace('imap.', 'smtp.');
+        if (senderUser.imap_user) smtpUser = senderUser.imap_user;
+        if (senderUser.imap_password) smtpPass = decrypt(senderUser.imap_password);
+      }
+
       const { spawn } = require('child_process');
       const child = spawn('python', [path.join(__dirname, 'send_email.py')]);
       let stdout = '', stderr = '';
@@ -890,7 +1326,30 @@ Return ONLY the email content (subject line and email body). Do not include any 
 
       child.on('close', code => {
         if (code === 0) {
-          return json(res, 200, { success: true, message: 'Email sent successfully!' });
+          // Persist sent email into SQLite DB so it shows in Sent Logs!
+          const now = new Date().toISOString();
+          try {
+            stmts.insertEmail.run(
+              user.id,
+              recipient,
+              subject,
+              body,
+              now,
+              'Medium',
+              'Sent',
+              'composer',
+              'Outbound AI Email',
+              `Outbound email dispatched via AI Composer to ${recipient}`,
+              JSON.stringify([]),
+              body,
+              null,
+              0,
+              account ? account.id : null
+            );
+          } catch (dbErr) {
+            console.error('[Composer DB Log Error]', dbErr.message);
+          }
+          return json(res, 200, { success: true, message: 'Email sent successfully and recorded in Sent Logs!' });
         } else {
           console.error(`Send custom email SMTP error: ${stderr || stdout}`);
           return json(res, 502, { success: false, message: `SMTP failed: ${stderr || stdout}` });
@@ -901,9 +1360,11 @@ Return ONLY the email content (subject line and email body). Do not include any 
         recipient,
         subject,
         body,
-        smtp_server: senderUser ? senderUser.imap_server : null,
-        smtp_user: senderUser ? senderUser.imap_user : null,
-        smtp_pass: senderUser && senderUser.imap_password ? decrypt(senderUser.imap_password) : null
+        smtp_server: smtpServer,
+        smtp_user: smtpUser,
+        smtp_pass: smtpPass,
+        auth_type: authType,
+        oauth_refresh_token: oauthRefreshToken
       });
 
       child.stdin.write(payload);
@@ -911,6 +1372,170 @@ Return ONLY the email content (subject line and email body). Do not include any 
       return;
     } catch (err) {
       console.error('Send custom email error:', err);
+      return json(res, 500, { success: false, message: 'Internal server error.' });
+    }
+  }
+
+  // ── Google OAuth: Initiate ─────────────────────────────────────────────
+  if (url.pathname === '/auth/google' && method === 'GET') {
+    const sessionToken = url.searchParams.get('token');
+    const userId = url.searchParams.get('userId');
+    
+    const state = Buffer.from(JSON.stringify({ token: sessionToken, userId })).toString('base64');
+    
+    const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+      `client_id=${encodeURIComponent(GOOGLE_CLIENT_ID)}` +
+      `&redirect_uri=${encodeURIComponent(GOOGLE_REDIRECT_URI)}` +
+      `&response_type=code` +
+      `&scope=${encodeURIComponent(GOOGLE_SCOPES)}` +
+      `&access_type=offline` +
+      `&prompt=consent` +
+      `&state=${encodeURIComponent(state)}`;
+    
+    res.writeHead(302, { 'Location': authUrl });
+    res.end();
+    return;
+  }
+
+  // ── Google OAuth: Callback ────────────────────────────────────────────
+  if (url.pathname === '/auth/google/callback' && method === 'GET') {
+    try {
+      const code = url.searchParams.get('code');
+      const stateRaw = url.searchParams.get('state');
+      
+      if (!code) {
+        res.writeHead(302, { 'Location': '/dashboard.html?oauth_error=no_code' });
+        res.end();
+        return;
+      }
+      
+      // Parse state to get user info
+      let stateData = {};
+      try {
+        stateData = JSON.parse(Buffer.from(decodeURIComponent(stateRaw), 'base64').toString('utf-8'));
+      } catch (e) { /* ignore parse errors */ }
+      
+      // Verify the session
+      const session = stmts.getSession.get(stateData.token);
+      if (!session || new Date(session.expires_at) < new Date()) {
+        res.writeHead(302, { 'Location': '/?oauth_error=session_expired' });
+        res.end();
+        return;
+      }
+      
+      const targetUserId = stateData.userId ? parseInt(stateData.userId, 10) : session.user_id;
+      
+      // Exchange code for tokens
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code,
+          client_id: GOOGLE_CLIENT_ID,
+          client_secret: GOOGLE_CLIENT_SECRET,
+          redirect_uri: GOOGLE_REDIRECT_URI,
+          grant_type: 'authorization_code'
+        }).toString()
+      });
+      
+      const tokenData = await tokenRes.json();
+      
+      if (!tokenData.access_token) {
+        console.error('OAuth token exchange failed:', tokenData);
+        res.writeHead(302, { 'Location': '/dashboard.html?oauth_error=token_failed' });
+        res.end();
+        return;
+      }
+      
+      // Get user's email from ID token or userinfo
+      let userEmail = '';
+      if (tokenData.id_token) {
+        try {
+          const payload = JSON.parse(Buffer.from(tokenData.id_token.split('.')[1], 'base64').toString('utf-8'));
+          userEmail = payload.email || '';
+        } catch (e) { /* ignore */ }
+      }
+      
+      if (!userEmail) {
+        // Fallback: fetch from userinfo endpoint
+        const infoRes = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+          headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
+        });
+        const infoData = await infoRes.json();
+        userEmail = infoData.email || '';
+      }
+      
+      if (!userEmail) {
+        res.writeHead(302, { 'Location': '/dashboard.html?oauth_error=no_email' });
+        res.end();
+        return;
+      }
+      
+      userEmail = userEmail.toLowerCase().trim();
+      const refreshToken = tokenData.refresh_token || '';
+      const encryptedRefresh = encrypt(refreshToken);
+      const createdAt = new Date().toISOString();
+      
+      // Check if this email account already exists for this user
+      const existing = db.prepare(`SELECT id FROM imap_accounts WHERE user_id = ? AND email = ?`).get(targetUserId, userEmail);
+      
+      if (existing) {
+        // Update existing account with new OAuth tokens
+        db.prepare(`UPDATE imap_accounts SET auth_type = 'oauth', oauth_refresh_token = ?, imap_password = '' WHERE id = ?`).run(encryptedRefresh, existing.id);
+        console.log(`[OAuth] Updated OAuth tokens for ${userEmail} (account ${existing.id})`);
+      } else {
+        // Insert new account
+        db.prepare(`
+          INSERT INTO imap_accounts (user_id, email, imap_server, imap_port, imap_user, imap_password, created_at, auth_type, oauth_refresh_token)
+          VALUES (?, ?, 'imap.gmail.com', 993, ?, '', ?, 'oauth', ?)
+        `).run(targetUserId, userEmail, userEmail, createdAt, encryptedRefresh);
+        console.log(`[OAuth] Connected ${userEmail} via Google OAuth for user ${targetUserId}`);
+      }
+      
+      res.writeHead(302, { 'Location': '/dashboard.html?oauth_success=true' });
+      res.end();
+      return;
+    } catch (err) {
+      console.error('OAuth callback error:', err);
+      res.writeHead(302, { 'Location': '/dashboard.html?oauth_error=server_error' });
+      res.end();
+      return;
+    }
+  }
+
+  // ── API: Clean / Purge Clutter Emails (Overload Solution) ───────────────
+  if (url.pathname === '/api/clean-inbox' && method === 'POST') {
+    const user = getAuthUser(req);
+    if (!user) return json(res, 401, { success: false, message: 'Authentication required.' });
+    try {
+      const { purgeCategories, olderThanDays } = await parseJsonBody(req);
+      const categories = Array.isArray(purgeCategories) && purgeCategories.length > 0 
+        ? purgeCategories 
+        : ['spam', 'promotion', 'newsletter'];
+      
+      const placeholders = categories.map(() => '?').join(',');
+      let query = `DELETE FROM emails WHERE category IN (${placeholders})`;
+      const params = [...categories];
+
+      if (user.role !== 'admin') {
+        query += ` AND user_id = ?`;
+        params.push(user.id);
+      }
+
+      if (olderThanDays && parseInt(olderThanDays, 10) > 0) {
+        const cutoffDate = new Date(Date.now() - parseInt(olderThanDays, 10) * 24 * 60 * 60 * 1000).toISOString();
+        query += ` AND received_at < ?`;
+        params.push(cutoffDate);
+      }
+
+      const result = db.prepare(query).run(...params);
+      return json(res, 200, {
+        success: true,
+        message: `Successfully purged ${result.changes} junk/clutter email(s)!`,
+        count: result.changes
+      });
+    } catch (err) {
+      console.error('Clean inbox error:', err);
       return json(res, 500, { success: false, message: 'Internal server error.' });
     }
   }
@@ -924,6 +1549,8 @@ Return ONLY the email content (subject line and email body). Do not include any 
       filePath = path.join(FRONTEND_DIR, 'index.html');
     } else if (url.pathname === '/dashboard.html' || url.pathname === '/dashboard') {
       filePath = path.join(FRONTEND_DIR, 'dashboard.html');
+    } else if (url.pathname === '/admin.html' || url.pathname === '/admin') {
+      filePath = path.join(FRONTEND_DIR, 'admin.html');
     } else {
       // Map /css/style.css → frontend/css/style.css, /js/app.js → frontend/js/app.js
       const safePath = url.pathname.replace(/\.\./g, '');
@@ -956,6 +1583,10 @@ Return ONLY the email content (subject line and email body). Do not include any 
   res.end(JSON.stringify({ success: false, message: 'Not found.' }));
 });
 
-server.listen(PORT, () => {
-  console.log(`Server is running at http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`Server is running at http://localhost:${PORT}`);
+  });
+}
+
+module.exports = server;
