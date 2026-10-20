@@ -10,4 +10,6 @@ node_modules/
 agent_output.txt
 data/exports/
 backend/data/exports/
+*.zip
+.vscode/
 

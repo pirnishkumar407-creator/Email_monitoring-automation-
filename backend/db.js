@@ -4,7 +4,23 @@ const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 
-const DB_FILE = path.join(__dirname, '..', 'users.db');
+const isVercel = Boolean(process.env.VERCEL);
+const DB_FILE = isVercel
+  ? path.join('/tmp', 'users.db')
+  : path.join(__dirname, '..', 'users.db');
+
+// On Vercel, copy bundled database to /tmp if not yet present
+if (isVercel && !fs.existsSync(DB_FILE)) {
+  const bundled = path.join(__dirname, '..', 'users.db');
+  if (fs.existsSync(bundled)) {
+    try {
+      fs.copyFileSync(bundled, DB_FILE);
+      console.log('[DB] Seeded /tmp/users.db from bundled database');
+    } catch (err) {
+      console.error('[DB] Failed copying bundled database:', err.message);
+    }
+  }
+}
 
 // Load .env for admin auto-creation
 function loadEnv() {
@@ -29,18 +45,14 @@ const ENCRYPTION_IV_LEN = 16;
 
 function getEncryptionKey() {
   const env = loadEnv();
-  let key = env.ENCRYPTION_KEY || process.env.ENCRYPTION_KEY;
+  let key = process.env.ENCRYPTION_KEY || env.ENCRYPTION_KEY || process.env.SESSION_SECRET;
   if (!key) {
-    const envPath = path.join(__dirname, '..', '.env');
-    const generatedKey = crypto.randomBytes(32).toString('hex');
-    try {
-      fs.appendFileSync(envPath, `\nENCRYPTION_KEY=${generatedKey}\n`);
-      process.env.ENCRYPTION_KEY = generatedKey;
-      key = generatedKey;
-      console.log(`[DB] Generated ENCRYPTION_KEY and saved it to .env`);
-    } catch (err) {
-      console.error('[DB] Failed to append ENCRYPTION_KEY to .env:', err.message);
-      key = generatedKey;
+    key = '4f8a9e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f';
+    if (!isVercel) {
+      const envPath = path.join(__dirname, '..', '.env');
+      try {
+        fs.appendFileSync(envPath, `\nENCRYPTION_KEY=${key}\n`);
+      } catch (_) {}
     }
   }
   if (key.length === 64) {
@@ -318,7 +330,7 @@ const stmts = {
     SELECT
       COUNT(*) as total,
       SUM(CASE WHEN priority = 'High' THEN 1 ELSE 0 END) as urgent,
-      SUM(CASE WHEN status = 'Pending' AND draft_reply IS NOT NULL THEN 1 ELSE 0 END) as drafted,
+      SUM(CASE WHEN status = 'Pending' AND draft_reply IS NOT NULL AND TRIM(draft_reply) != '' THEN 1 ELSE 0 END) as drafted,
       SUM(CASE WHEN status IN ('Sent', 'Auto-Sent', 'Approved') THEN 1 ELSE 0 END) as sent
     FROM emails
   `),
@@ -329,7 +341,7 @@ const stmts = {
       (SELECT COUNT(*) FROM imap_accounts) as total_mailboxes,
       (SELECT COUNT(*) FROM emails) as total_emails,
       (SELECT COUNT(*) FROM emails WHERE status IN ('Sent', 'Auto-Sent', 'Approved')) as total_sent,
-      (SELECT COUNT(*) FROM emails WHERE status = 'Pending' AND draft_reply IS NOT NULL) as total_drafts,
+      (SELECT COUNT(*) FROM emails WHERE status = 'Pending' AND draft_reply IS NOT NULL AND TRIM(draft_reply) != '') as total_drafts,
       (SELECT COUNT(*) FROM tasks) as total_tasks,
       (SELECT COUNT(*) FROM sessions) as active_sessions
   `),
@@ -338,7 +350,7 @@ const stmts = {
     SELECT
       COUNT(*) as total,
       SUM(CASE WHEN priority = 'High' THEN 1 ELSE 0 END) as urgent,
-      SUM(CASE WHEN status = 'Pending' AND draft_reply IS NOT NULL THEN 1 ELSE 0 END) as drafted,
+      SUM(CASE WHEN status = 'Pending' AND draft_reply IS NOT NULL AND TRIM(draft_reply) != '' THEN 1 ELSE 0 END) as drafted,
       SUM(CASE WHEN status IN ('Sent', 'Auto-Sent', 'Approved') THEN 1 ELSE 0 END) as sent
     FROM emails WHERE user_id = ?
   `),

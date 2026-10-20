@@ -83,13 +83,13 @@ function startLiveMonitoring() {
   // Initial check
   checkMonitoringHealth();
 
-  // Poll monitoring status and new emails every 30 seconds
+  // Poll monitoring status and new emails every 5 seconds for real-time live inbox
   setInterval(async () => {
     await checkMonitoringHealth();
-  }, 30000);
+  }, 5000);
 
-  // Update time-ago ticker every 5 seconds
-  setInterval(updateLiveTicker, 5000);
+  // Update time-ago ticker every 3 seconds
+  setInterval(updateLiveTicker, 3000);
 }
 
 async function checkMonitoringHealth() {
@@ -286,6 +286,7 @@ function connectWithGoogle() {
       'session_expired': 'Your session expired. Please log in again.',
       'token_failed': 'Failed to exchange Google token. Please try again.',
       'no_email': 'Could not retrieve email from Google.',
+      'missing_gmail_permission': 'Gmail permission was not granted. Please ensure the Gmail API is enabled in Google Cloud Console and check the Gmail permission box when authorizing.',
       'server_error': 'Server error during OAuth. Please try again.'
     };
     const errMsg = errorMap[params.get('oauth_error')] || 'OAuth connection failed.';

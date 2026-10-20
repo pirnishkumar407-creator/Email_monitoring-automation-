@@ -160,17 +160,33 @@ function checkAutoSend() {
 // Auto-send timer: Check every 60 seconds
 setInterval(checkAutoSend, 60000);
 
-// Auto-sync timer: Live background email monitoring (checks every 60s)
+// Auto-sync timer: Live background email monitoring (checks every 15s)
 let isAgentSyncing = false;
 let lastSyncTimestamp = new Date().toISOString();
 let lastSyncStatus = 'idle';
 
-function autoSyncEmails() {
+function autoSyncEmails(targetSpecificUserId = null) {
   if (isAgentSyncing) return;
+
+  let userIdToSync = targetSpecificUserId;
+  if (!userIdToSync) {
+    try {
+      const activeSessions = db.prepare(`SELECT DISTINCT user_id FROM sessions WHERE expires_at > datetime('now') ORDER BY id DESC`).all();
+      if (activeSessions.length > 0) {
+        userIdToSync = activeSessions[0].user_id;
+      } else {
+        const anyAccount = db.prepare(`SELECT user_id FROM imap_accounts ORDER BY id DESC LIMIT 1`).get();
+        if (anyAccount) userIdToSync = anyAccount.user_id;
+      }
+    } catch (_) {}
+  }
+
+  const args = userIdToSync ? ['--user-id', `${userIdToSync}`] : [];
+
   isAgentSyncing = true;
   lastSyncStatus = 'syncing';
   const { spawn } = require('child_process');
-  const child = spawn('python', [path.join(__dirname, 'agent.py')], {
+  const child = spawn('python', [path.join(__dirname, 'agent.py'), ...args], {
     env: { ...process.env, PYTHONIOENCODING: 'utf-8' }
   });
 
@@ -178,14 +194,12 @@ function autoSyncEmails() {
   if (child.stdout) child.stdout.on('data', d => { output += d; });
   if (child.stderr) child.stderr.on('data', d => { output += d; });
 
-  // Give the full Gmail IMAP + Gemini API cycle time to complete (90s)
   const timeoutId = setTimeout(() => {
     try { child.kill(); } catch (_) {}
     isAgentSyncing = false;
     lastSyncStatus = 'timeout';
     lastSyncTimestamp = new Date().toISOString();
-    console.log('[Auto-Sync] Agent timed out after 90s');
-  }, 90000);
+  }, 45000);
 
   child.on('close', (code) => {
     clearTimeout(timeoutId);
@@ -203,10 +217,10 @@ function autoSyncEmails() {
     console.error('[Auto-Sync Error]', err.message);
   });
 }
-// Run every 60 seconds for live background inbox monitoring
-setInterval(autoSyncEmails, 60000);
-// Also run once immediately on server start after 5 seconds
-setTimeout(autoSyncEmails, 5000);
+// Run every 15 seconds for live background inbox monitoring
+setInterval(autoSyncEmails, 15000);
+// Also run once immediately on server start after 3 seconds
+setTimeout(autoSyncEmails, 3000);
 
 
 
@@ -630,6 +644,11 @@ const server = http.createServer(async (req, res) => {
       // Calculate how many seconds since last successful sync
       const secsSinceSync = Math.floor((Date.now() - new Date(lastSyncTimestamp).getTime()) / 1000);
 
+      // Silently trigger background sync for this active user if >15s have elapsed and not already syncing
+      if (userAccounts > 0 && !isAgentSyncing && secsSinceSync >= 15) {
+        setImmediate(() => autoSyncEmails(user.id));
+      }
+
       return json(res, 200, {
         success: true,
         isSyncing: isAgentSyncing,
@@ -637,8 +656,7 @@ const server = http.createServer(async (req, res) => {
         lastSyncStatus: lastSyncStatus,
         secsSinceLastSync: secsSinceSync,
         accountsCount: userAccounts,
-        // connected = has accounts + last sync was within 3 minutes
-        isConnected: userAccounts > 0 && secsSinceSync < 180
+        isConnected: userAccounts > 0
       });
     } catch (err) {
       return json(res, 500, { success: false, message: err.message });
@@ -1472,6 +1490,16 @@ Return ONLY the email content (subject line and email body). Do not include any 
       }
       
       userEmail = userEmail.toLowerCase().trim();
+      const grantedScope = tokenData.scope || '';
+      console.log(`[OAuth] Granted scope for ${userEmail}:`, grantedScope);
+
+      if (!grantedScope.includes('mail.google.com')) {
+        console.warn(`[OAuth Warning] User ${userEmail} did not grant Gmail scope (https://mail.google.com/). Granted: ${grantedScope}`);
+        res.writeHead(302, { 'Location': '/dashboard.html?oauth_error=missing_gmail_permission' });
+        res.end();
+        return;
+      }
+
       const refreshToken = tokenData.refresh_token || '';
       const encryptedRefresh = encrypt(refreshToken);
       const createdAt = new Date().toISOString();

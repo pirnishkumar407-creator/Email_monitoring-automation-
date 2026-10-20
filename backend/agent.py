@@ -144,7 +144,7 @@ def load_env():
     env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
     if not os.path.exists(env_path):
         return
-    with open(env_path, 'r') as f:
+    with open(env_path, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
             if not line or line.startswith('#'):
@@ -154,6 +154,8 @@ def load_env():
                 key = line[:eq].strip()
                 val = line[eq+1:].strip()
                 os.environ[key] = val
+
+load_env()
 
 # ── Decryption Helper ────────────────────────────────────────────────────────
 
@@ -397,6 +399,17 @@ def get_existing_email_id(sender, subject, body, user_id=1):
         print(f"[DB Error checking existence] {e}")
         return None
 
+def get_existing_email_id_fast(sender, subject, user_id=1):
+    try:
+        conn = sqlite3.connect(DB_FILE, timeout=5.0)
+        c = conn.cursor()
+        c.execute("SELECT id FROM emails WHERE user_id = ? AND sender = ? AND subject = ? LIMIT 1", (user_id, sender, subject))
+        row = c.fetchone()
+        conn.close()
+        return row[0] if row else None
+    except Exception:
+        return None
+
 # ── Database Insert ──────────────────────────────────────────────────────────
 
 def insert_email_to_db(email, user_id=1, imap_account_id=None):
@@ -517,9 +530,12 @@ GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
 def refresh_google_access_token(refresh_token):
     """Exchange a refresh token for a fresh access token."""
     try:
+        load_env()
+        client_id = os.environ.get('GOOGLE_CLIENT_ID') or GOOGLE_CLIENT_ID
+        client_secret = os.environ.get('GOOGLE_CLIENT_SECRET') or GOOGLE_CLIENT_SECRET
         data = urllib.parse.urlencode({
-            'client_id': GOOGLE_CLIENT_ID,
-            'client_secret': GOOGLE_CLIENT_SECRET,
+            'client_id': client_id,
+            'client_secret': client_secret,
             'refresh_token': refresh_token,
             'grant_type': 'refresh_token'
         }).encode('utf-8')
@@ -600,8 +616,10 @@ def run_real_agent(imap_server, imap_user, imap_pass, llm_api_key, user_id=1, im
 
 
             for msg_id in messages:
-                response = client.fetch(msg_id, ['ENVELOPE', 'RFC822'])
-                data = response[msg_id]
+                response = client.fetch(msg_id, ['ENVELOPE'])
+                data = response.get(msg_id)
+                if not data or b'ENVELOPE' not in data:
+                    continue
                 envelope = data[b'ENVELOPE']
 
                 # Parse sender
@@ -629,9 +647,16 @@ def run_real_agent(imap_server, imap_user, imap_pass, llm_api_key, user_id=1, im
                     except Exception:
                         subject = raw_subj
 
+                # FAST CHECK: Check if this email already exists in our database for this specific user
+                existing_id = get_existing_email_id_fast(sender_addr, subject, user_id)
+                if existing_id:
+                    if msg_id in unseen_messages:
+                        client.add_flags(msg_id, '\\Seen')
+                    continue
 
-                # Parse body robustly using email library
-                raw_bytes = data.get(b'RFC822', b'')
+                # ONLY fetch RFC822 for NEW emails that are not yet processed!
+                body_resp = client.fetch(msg_id, ['RFC822'])
+                raw_bytes = body_resp.get(msg_id, {}).get(b'RFC822', b'')
                 body = ""
                 try:
                     msg = email_module.message_from_bytes(raw_bytes)
@@ -654,15 +679,6 @@ def run_real_agent(imap_server, imap_user, imap_pass, llm_api_key, user_id=1, im
                 # Fallback if body is empty
                 if not body.strip():
                     body = "Empty body."
-
-                # Check if this email already exists in our database for this specific user
-                existing_id = get_existing_email_id(sender_addr, subject, body, user_id)
-                if existing_id:
-                    print(f"\n[Skip] Email from {sender_addr}: '{subject}' already processed for user {user_id} (ID: {existing_id})")
-                    if msg_id in unseen_messages:
-                        client.add_flags(msg_id, '\\Seen')
-                        print(f"[IMAP] Marked unseen email {msg_id} as Read.")
-                    continue
 
                 insights = None
                 if llm_api_key:
@@ -691,8 +707,7 @@ def run_real_agent(imap_server, imap_user, imap_pass, llm_api_key, user_id=1, im
                         client.add_flags(msg_id, '\\Seen')
                         print(f"[IMAP] Marked email {msg_id} as Read.")
 
-
-                time.sleep(1.0)
+                time.sleep(0.5)
 
             print(f"[OK] Inbox processing completed for {imap_user}.")
 

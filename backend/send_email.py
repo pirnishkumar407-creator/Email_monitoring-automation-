@@ -27,11 +27,16 @@ def load_env():
             if eq > 0:
                 os.environ[line[:eq].strip()] = line[eq+1:].strip()
 
+load_env()
+
 def refresh_google_access_token(refresh_token):
     try:
+        load_env()
+        client_id = os.environ.get('GOOGLE_CLIENT_ID') or GOOGLE_CLIENT_ID
+        client_secret = os.environ.get('GOOGLE_CLIENT_SECRET') or GOOGLE_CLIENT_SECRET
         data = urllib.parse.urlencode({
-            'client_id': GOOGLE_CLIENT_ID,
-            'client_secret': GOOGLE_CLIENT_SECRET,
+            'client_id': client_id,
+            'client_secret': client_secret,
             'refresh_token': refresh_token,
             'grant_type': 'refresh_token'
         }).encode('utf-8')
