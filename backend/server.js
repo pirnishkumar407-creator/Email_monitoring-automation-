@@ -18,8 +18,17 @@ const PORT = 3000;
 // ── Google OAuth 2.0 Configuration ──────────────────────────────────────────
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
-const GOOGLE_REDIRECT_URI = `http://localhost:${PORT}/auth/google/callback`;
 const GOOGLE_SCOPES = 'https://mail.google.com/ https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile openid';
+
+function getGoogleRedirectUri(req) {
+  if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const proto = req.headers['x-forwarded-proto'] || (req.socket && req.socket.encrypted ? 'https' : 'http');
+  if (host && !host.includes('localhost') && !host.includes('127.0.0.1')) {
+    return `${proto}://${host}/auth/google/callback`;
+  }
+  return `http://localhost:${PORT}/auth/google/callback`;
+}
 
 // Helper to automatically configure IMAP based on email domain
 function autoConfigureImap(userId, email, password) {
@@ -1396,14 +1405,20 @@ Return ONLY the email content (subject line and email body). Do not include any 
 
   // ── Google OAuth: Initiate ─────────────────────────────────────────────
   if (url.pathname === '/auth/google' && method === 'GET') {
+    if (!GOOGLE_CLIENT_ID) {
+      res.writeHead(302, { 'Location': '/dashboard.html?oauth_error=missing_client_id' });
+      res.end();
+      return;
+    }
     const sessionToken = url.searchParams.get('token');
     const userId = url.searchParams.get('userId');
     
     const state = Buffer.from(JSON.stringify({ token: sessionToken, userId })).toString('base64');
+    const redirectUri = getGoogleRedirectUri(req);
     
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
       `client_id=${encodeURIComponent(GOOGLE_CLIENT_ID)}` +
-      `&redirect_uri=${encodeURIComponent(GOOGLE_REDIRECT_URI)}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
       `&response_type=code` +
       `&scope=${encodeURIComponent(GOOGLE_SCOPES)}` +
       `&access_type=offline` +
@@ -1442,6 +1457,7 @@ Return ONLY the email content (subject line and email body). Do not include any 
       }
       
       const targetUserId = stateData.userId ? parseInt(stateData.userId, 10) : session.user_id;
+      const redirectUri = getGoogleRedirectUri(req);
       
       // Exchange code for tokens
       const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
@@ -1451,7 +1467,7 @@ Return ONLY the email content (subject line and email body). Do not include any 
           code,
           client_id: GOOGLE_CLIENT_ID,
           client_secret: GOOGLE_CLIENT_SECRET,
-          redirect_uri: GOOGLE_REDIRECT_URI,
+          redirect_uri: redirectUri,
           grant_type: 'authorization_code'
         }).toString()
       });

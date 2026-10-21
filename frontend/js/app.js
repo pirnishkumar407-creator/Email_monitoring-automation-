@@ -297,6 +297,7 @@ function connectWithGoogle() {
       'token_failed': 'Failed to exchange Google token. Please try again.',
       'no_email': 'Could not retrieve email from Google.',
       'missing_gmail_permission': 'Gmail permission was not granted. Please ensure the Gmail API is enabled in Google Cloud Console and check the Gmail permission box when authorizing.',
+      'missing_client_id': 'Google OAuth Client ID is not configured on this server/Vercel. Please add GOOGLE_CLIENT_ID in Vercel Settings or connect via App Password.',
       'server_error': 'Server error during OAuth. Please try again.'
     };
     const errMsg = errorMap[params.get('oauth_error')] || 'OAuth connection failed.';
