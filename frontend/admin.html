@@ -2,9 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
   <meta name="description" content="AI Email Automation System — Administrator Command Center">
+  <meta name="theme-color" content="#0b0f19">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AI Email Admin">
   <title>Admin Control Center — AI Email Automation</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
@@ -168,18 +176,24 @@
   </style>
 </head>
 <body class="dashboard-body">
+  <!-- Mobile Sidebar Backdrop Overlay -->
+  <div class="sidebar-backdrop" id="sidebarBackdrop" onclick="closeMobileMenu()"></div>
+
   <div class="app-layout">
 
     <!-- ── Sidebar ─────────────────────────────────────────────────── -->
     <aside class="sidebar" id="sidebar">
       <div class="sidebar-brand">
-        <div class="brand-icon" style="background: linear-gradient(135deg, #ef4444, #8b5cf6);">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div class="brand-icon" style="background: linear-gradient(135deg, #ef4444, #8b5cf6);">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <div style="display:flex; flex-direction:column;">
+            <span class="brand-text">Admin Center</span>
+            <span style="font-size:0.65rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">System Management</span>
+          </div>
         </div>
-        <div style="display:flex; flex-direction:column;">
-          <span class="brand-text">Admin Center</span>
-          <span style="font-size:0.65rem; color:var(--text-muted); font-weight:600; text-transform:uppercase;">System Management</span>
-        </div>
+        <button class="sidebar-close-btn" onclick="closeMobileMenu()" aria-label="Close sidebar">✕</button>
       </div>
 
       <nav class="sidebar-nav">
@@ -233,11 +247,16 @@
       <!-- Header -->
       <header class="main-header">
         <div class="header-left">
-          <div style="display:flex; align-items:center; gap:12px;">
-            <h2 id="adminPageTitle">System Overview</h2>
-            <span class="admin-badge" id="aiHealthBadge"><span class="status-pulse"></span> AI Engine Online</span>
+          <button class="mobile-menu-toggle" id="hamburgerBtn" onclick="toggleMobileMenu()" aria-label="Open Navigation Drawer" title="Menu">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
+          <div>
+            <div style="display:flex; align-items:center; gap:12px;">
+              <h2 id="adminPageTitle">System Overview</h2>
+              <span class="admin-badge" id="aiHealthBadge"><span class="status-pulse"></span> AI Engine Online</span>
+            </div>
+            <p id="adminPageSubtitle" class="header-subtitle">Real-time system health, users, and infrastructure oversight</p>
           </div>
-          <p id="adminPageSubtitle" class="header-subtitle">Real-time system health, users, and infrastructure oversight</p>
         </div>
         <div class="header-right">
           <button class="header-btn" onclick="testGeminiConnection()" id="btnTestAi" title="Check Gemini AI Status">
@@ -532,6 +551,7 @@
     </div>
   </div>
 
+  <script src="/js/pwa.js"></script>
   <script src="/js/admin.js"></script>
 </body>
 </html>

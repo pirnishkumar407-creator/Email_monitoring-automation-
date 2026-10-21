@@ -2,7 +2,8 @@
 *.db
 *.db-shm
 *.db-wal
-*.db.bak
+*.db.bak*
+*.bak*
 *.sqlite
 __pycache__/
 *.pyc

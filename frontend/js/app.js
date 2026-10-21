@@ -206,6 +206,16 @@ function switchTab(tab) {
     btn.classList.toggle('active', btn.dataset.tab === tab);
   });
 
+  // Update mobile bottom nav dock buttons
+  document.querySelectorAll('.mobile-nav-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tab);
+  });
+
+  // Auto-close mobile drawer if open
+  if (typeof closeMobileMenu === 'function') {
+    closeMobileMenu();
+  }
+
   // Update content sections
   document.querySelectorAll('.tab-content').forEach(section => {
     section.classList.toggle('active', section.id === `tab-${tab}`);
@@ -483,6 +493,7 @@ function renderMonitoring() {
   setTxt('monCountMed', medEmailsAll.length);
   setTxt('monCountLow', lowEmailsAll.length);
   setTxt('monCountAll', allEmails.length);
+  setTxt('mobileInboxBadge', allEmails.length);
 
   setTxt('monPillHigh', highEmailsAll.length);
   setTxt('monPillMed', medEmailsAll.length);

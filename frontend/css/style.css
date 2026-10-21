@@ -1725,15 +1725,115 @@ body.light-mode .user-info {
 }
 
 @media (max-width: 768px) {
-  .sidebar { width: 60px; }
+  /* Off-canvas Mobile Sidebar Drawer */
+  .sidebar {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px !important;
+    max-width: 85vw;
+    z-index: 1100 !important;
+    transform: translateX(-105%);
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+    box-shadow: none;
+    background: var(--bg-sidebar, #0c1220);
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  .sidebar.mobile-open {
+    transform: translateX(0) !important;
+    box-shadow: 10px 0 40px rgba(0, 0, 0, 0.65);
+  }
   .sidebar .brand-text,
   .sidebar .nav-item span,
   .sidebar .user-details,
-  .sidebar .logout-btn span { display: none; }
-  .sidebar-brand { justify-content: center; padding: 16px 8px; }
-  .nav-item { justify-content: center; padding: 10px; }
-  .main-content { margin-left: 60px; }
-  .stats-grid { grid-template-columns: 1fr; }
+  .sidebar .logout-btn span {
+    display: inline !important;
+  }
+  .sidebar-brand {
+    justify-content: space-between !important;
+    padding: 18px 16px !important;
+  }
+  .sidebar-close-btn {
+    display: inline-flex !important;
+  }
+  .nav-item {
+    justify-content: flex-start !important;
+    padding: 12px 16px !important;
+    font-size: 0.95rem;
+  }
+
+  /* Main content full width on mobile with safe bottom padding */
+  .main-content {
+    margin-left: 0 !important;
+    padding: 12px 14px !important;
+    padding-bottom: calc(76px + env(safe-area-inset-bottom)) !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden;
+  }
+
+  /* Header on Mobile */
+  .main-header {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+    padding: 8px 0 14px 0 !important;
+  }
+  .header-left {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+  }
+  .mobile-menu-toggle {
+    display: inline-flex !important;
+  }
+  .header-right {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+  .header-right .header-btn,
+  .header-right .live-status-pill {
+    flex: 1 1 auto !important;
+    justify-content: center !important;
+    font-size: 0.82rem !important;
+    padding: 8px 10px !important;
+  }
+
+  /* Stat cards: 2x2 grid on mobile */
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px !important;
+  }
+  .stat-card {
+    padding: 14px 12px !important;
+  }
+  .stat-value {
+    font-size: 1.5rem !important;
+  }
+  .stat-label {
+    font-size: 0.72rem !important;
+  }
+
+  /* Tables: Horizontal scroll with touch momentum */
+  .table-responsive,
+  .monitoring-table-wrapper {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: var(--radius-md);
+  }
+
+  /* Bottom Navigation Dock for Mobile */
+  .mobile-bottom-nav {
+    display: flex !important;
+  }
   .form-row { grid-template-columns: 1fr; }
 }
 
@@ -2227,6 +2327,269 @@ body.light-mode .composer-textarea {
   background: #ffffff;
   border-color: rgba(0, 0, 0, 0.12);
   color: #0f172a;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PWA & MOBILE RESPONSIVE COMPONENTS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Mobile Hamburger Toggle Button ──────────────────────────────────────── */
+.mobile-menu-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-sm, 10px);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-menu-toggle:hover,
+.mobile-menu-toggle:active {
+  background: rgba(99, 102, 241, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Sidebar Backdrop Overlay ────────────────────────────────────────────── */
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 1050;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@media (max-width: 768px) {
+  .sidebar-backdrop {
+    display: block;
+  }
+  .sidebar-backdrop.active {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* ── Sidebar Mobile Close Button ─────────────────────────────────────────── */
+.sidebar-close-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  transition: all 0.2s;
+}
+.sidebar-close-btn:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+/* ── Mobile Bottom Navigation Dock ───────────────────────────────────────── */
+.mobile-bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: calc(62px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: rgba(12, 18, 32, 0.94);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 990;
+  justify-content: space-around;
+  align-items: center;
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.5);
+}
+
+.mobile-nav-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 500;
+  padding: 8px 0;
+  cursor: pointer;
+  position: relative;
+  transition: color 0.2s ease, transform 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-nav-btn svg {
+  transition: transform 0.2s ease, stroke 0.2s ease;
+}
+.mobile-nav-btn.active {
+  color: #818cf8;
+  font-weight: 700;
+}
+.mobile-nav-btn.active svg {
+  transform: translateY(-2px) scale(1.12);
+  stroke: #818cf8;
+}
+.mobile-nav-btn .mobile-badge {
+  position: absolute;
+  top: 4px;
+  right: calc(50% - 22px);
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: white;
+  font-size: 0.62rem;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 10px;
+  min-width: 16px;
+  line-height: 1.3;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(239, 68, 68, 0.6);
+  pointer-events: none;
+}
+
+/* ── PWA Install Banner ──────────────────────────────────────────────────── */
+.pwa-install-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.18), rgba(6, 182, 212, 0.12));
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  border-radius: var(--radius-md, 12px);
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  animation: fadeInDown 0.3s ease;
+}
+.pwa-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.pwa-banner-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px var(--accent-glow);
+}
+.pwa-banner-text {
+  display: flex;
+  flex-direction: column;
+}
+.pwa-banner-text strong {
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.pwa-banner-text span {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+.pwa-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.pwa-btn-install {
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px var(--accent-glow);
+  transition: transform 0.2s, background 0.2s;
+}
+.pwa-btn-install:hover {
+  transform: translateY(-1px);
+  background: var(--accent-hover);
+}
+.pwa-btn-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+  font-size: 1rem;
+  line-height: 1;
+  border-radius: 6px;
+}
+.pwa-btn-dismiss:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* ── Light Mode Adaptations for PWA Components ───────────────────────────── */
+body.light-mode .mobile-bottom-nav {
+  background: rgba(255, 255, 255, 0.94);
+  border-top-color: rgba(0, 0, 0, 0.1);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08);
+}
+body.light-mode .mobile-nav-btn {
+  color: #64748b;
+}
+body.light-mode .mobile-nav-btn.active {
+  color: var(--accent);
+}
+body.light-mode .mobile-nav-btn.active svg {
+  stroke: var(--accent);
+}
+body.light-mode .mobile-menu-toggle {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+body.light-mode .pwa-install-banner {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(6, 182, 212, 0.08));
+  border-color: rgba(99, 102, 241, 0.25);
+}
+
+/* ── Small Devices Tweaks (<= 480px) ─────────────────────────────────────── */
+@media (max-width: 480px) {
+  .page-title {
+    font-size: 1.25rem !important;
+  }
+  .header-subtitle {
+    display: none;
+  }
+  .mon-stat-card .stat-value {
+    font-size: 1.25rem !important;
+  }
+  .composer-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .composer-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 
 
