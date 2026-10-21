@@ -1486,7 +1486,8 @@ Return ONLY the email content (subject line and email body). Do not include any 
       
       if (!tokenData.access_token) {
         console.error('OAuth token exchange failed:', tokenData);
-        res.writeHead(302, { 'Location': '/?oauth_error=token_failed' });
+        const errDetail = encodeURIComponent(tokenData.error_description || tokenData.error || 'token_failed');
+        res.writeHead(302, { 'Location': `/?oauth_error=token_failed&oauth_msg=${errDetail}` });
         res.end();
         return;
       }
@@ -1555,7 +1556,7 @@ Return ONLY the email content (subject line and email body). Do not include any 
       // Create a fresh session token for targetUser
       const newSessionToken = crypto.randomBytes(32).toString('hex');
       const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-      stmts.createSession.run(newSessionToken, targetUserId, expiresAt);
+      (stmts.createSession || stmts.insertSession).run(newSessionToken, targetUserId, expiresAt);
 
       // Save OAuth tokens if refresh_token was received
       const refreshToken = tokenData.refresh_token || '';

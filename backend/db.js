@@ -400,6 +400,7 @@ const stmts = {
 
   // Sessions
   insertSession: db.prepare(`INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)`),
+  createSession: db.prepare(`INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)`),
   getSession: db.prepare(`SELECT * FROM sessions WHERE id = ?`),
   deleteSession: db.prepare(`DELETE FROM sessions WHERE id = ?`),
   deleteExpiredSessions: db.prepare(`DELETE FROM sessions WHERE expires_at < ?`),

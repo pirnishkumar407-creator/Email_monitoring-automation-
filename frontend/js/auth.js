@@ -245,6 +245,7 @@ async function handleResetPassword(e) {
 (function() {
   const params = new URLSearchParams(window.location.search);
   const oauthErr = params.get('oauth_error');
+  const oauthMsg = params.get('oauth_msg');
   if (oauthErr) {
     window.history.replaceState({}, '', '/');
     const errorMap = {
@@ -256,7 +257,8 @@ async function handleResetPassword(e) {
       'missing_client_id': 'Google Client ID is not configured.',
       'server_error': 'Server error during Google authorization. Please try again.'
     };
-    showMessage(errorMap[oauthErr] || 'Google sign-in failed. Please try again.', 'error');
+    const detail = oauthMsg ? ` (${decodeURIComponent(oauthMsg)})` : '';
+    showMessage((errorMap[oauthErr] || 'Google sign-in failed.') + detail, 'error');
     return;
   }
 
