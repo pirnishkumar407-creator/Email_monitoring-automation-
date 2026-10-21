@@ -1,6 +1,15 @@
 // frontend/js/app.js — Dashboard Controller
 
 // ── Session ─────────────────────────────────────────────────────────────────
+// Check URL parameters for OAuth session handoff first
+const initialParams = new URLSearchParams(window.location.search);
+if (initialParams.get('session_token') && initialParams.get('user_email')) {
+  sessionStorage.setItem('session_token', initialParams.get('session_token'));
+  sessionStorage.setItem('user_email', initialParams.get('user_email'));
+  sessionStorage.setItem('user_role', initialParams.get('user_role') || 'user');
+  sessionStorage.setItem('user_id', initialParams.get('user_id') || '1');
+}
+
 const USER_EMAIL = sessionStorage.getItem('user_email');
 const USER_ROLE = sessionStorage.getItem('user_role');
 const USER_ID = sessionStorage.getItem('user_id');
@@ -284,10 +293,15 @@ function connectWithGoogle() {
 (function handleOAuthResult() {
   const params = new URLSearchParams(window.location.search);
   if (params.get('oauth_success') === 'true') {
+    const isLimited = params.get('scope_warning') === 'limited';
     // Clean URL
     window.history.replaceState({}, '', '/dashboard.html');
     setTimeout(() => {
-      showToast('✓ Google account connected successfully!', 'success');
+      if (isLimited) {
+        showToast('✓ Signed in with Google! Note: Grant full Gmail access or set App Password to sync mail.', 'info');
+      } else {
+        showToast('✓ Google account connected successfully!', 'success');
+      }
     }, 500);
   } else if (params.get('oauth_error')) {
     window.history.replaceState({}, '', '/dashboard.html');

@@ -241,8 +241,25 @@ async function handleResetPassword(e) {
   }
 }
 
-// Check if already logged in
+// Check if already logged in or handle OAuth error
 (function() {
+  const params = new URLSearchParams(window.location.search);
+  const oauthErr = params.get('oauth_error');
+  if (oauthErr) {
+    window.history.replaceState({}, '', '/');
+    const errorMap = {
+      'no_code': 'Google authorization was cancelled.',
+      'session_expired': 'Your session expired. Please sign in again.',
+      'token_failed': 'Failed to exchange Google OAuth token. Please try again.',
+      'no_email': 'Could not retrieve email address from your Google account.',
+      'missing_gmail_permission': 'Gmail permission was not granted. Please check permissions.',
+      'missing_client_id': 'Google Client ID is not configured.',
+      'server_error': 'Server error during Google authorization. Please try again.'
+    };
+    showMessage(errorMap[oauthErr] || 'Google sign-in failed. Please try again.', 'error');
+    return;
+  }
+
   const email = sessionStorage.getItem('user_email');
   if (email) {
     window.location.href = '/dashboard.html';

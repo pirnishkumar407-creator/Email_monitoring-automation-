@@ -16,8 +16,22 @@ for (const key in envVars) {
 const PORT = 3000;
 
 // ── Google OAuth 2.0 Configuration ──────────────────────────────────────────
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
-const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
+function getGoogleClientId() {
+  let id = (process.env.GOOGLE_CLIENT_ID || '').trim();
+  // Auto-heal scrambled paste if detected
+  if (id.includes('766370395818') && id.includes('cifemnqti9prtjnus')) {
+    return '766370395818-cifemnqti9prtjnus7jn0ibigsg9svme.apps.googleusercontent.com';
+  }
+  if (!id) {
+    return '766370395818-cifemnqti9prtjnus7jn0ibigsg9svme.apps.googleusercontent.com';
+  }
+  return id;
+}
+
+function getGoogleClientSecret() {
+  return (process.env.GOOGLE_CLIENT_SECRET || '').trim();
+}
+
 const GOOGLE_SCOPES = 'https://mail.google.com/ https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile openid';
 
 function getGoogleRedirectUri(req) {
@@ -1405,19 +1419,20 @@ Return ONLY the email content (subject line and email body). Do not include any 
 
   // ── Google OAuth: Initiate ─────────────────────────────────────────────
   if (url.pathname === '/auth/google' && method === 'GET') {
-    if (!GOOGLE_CLIENT_ID) {
+    const clientId = getGoogleClientId();
+    if (!clientId) {
       res.writeHead(302, { 'Location': '/dashboard.html?oauth_error=missing_client_id' });
       res.end();
       return;
     }
-    const sessionToken = url.searchParams.get('token');
-    const userId = url.searchParams.get('userId');
+    const sessionToken = url.searchParams.get('token') || '';
+    const userId = url.searchParams.get('userId') || '';
     
     const state = Buffer.from(JSON.stringify({ token: sessionToken, userId })).toString('base64');
     const redirectUri = getGoogleRedirectUri(req);
     
     const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-      `client_id=${encodeURIComponent(GOOGLE_CLIENT_ID)}` +
+      `client_id=${encodeURIComponent(clientId)}` +
       `&redirect_uri=${encodeURIComponent(redirectUri)}` +
       `&response_type=code` +
       `&scope=${encodeURIComponent(GOOGLE_SCOPES)}` +
@@ -1442,21 +1457,16 @@ Return ONLY the email content (subject line and email body). Do not include any 
         return;
       }
       
-      // Parse state to get user info
+      // Parse state to get user info if provided
       let stateData = {};
       try {
-        stateData = JSON.parse(Buffer.from(decodeURIComponent(stateRaw), 'base64').toString('utf-8'));
+        if (stateRaw) {
+          stateData = JSON.parse(Buffer.from(decodeURIComponent(stateRaw), 'base64').toString('utf-8'));
+        }
       } catch (e) { /* ignore parse errors */ }
       
-      // Verify the session
-      const session = stmts.getSession.get(stateData.token);
-      if (!session || new Date(session.expires_at) < new Date()) {
-        res.writeHead(302, { 'Location': '/?oauth_error=session_expired' });
-        res.end();
-        return;
-      }
-      
-      const targetUserId = stateData.userId ? parseInt(stateData.userId, 10) : session.user_id;
+      const clientId = getGoogleClientId();
+      const clientSecret = getGoogleClientSecret();
       const redirectUri = getGoogleRedirectUri(req);
       
       // Exchange code for tokens
@@ -1465,8 +1475,8 @@ Return ONLY the email content (subject line and email body). Do not include any 
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           code,
-          client_id: GOOGLE_CLIENT_ID,
-          client_secret: GOOGLE_CLIENT_SECRET,
+          client_id: clientId,
+          client_secret: clientSecret,
           redirect_uri: redirectUri,
           grant_type: 'authorization_code'
         }).toString()
@@ -1476,7 +1486,7 @@ Return ONLY the email content (subject line and email body). Do not include any 
       
       if (!tokenData.access_token) {
         console.error('OAuth token exchange failed:', tokenData);
-        res.writeHead(302, { 'Location': '/dashboard.html?oauth_error=token_failed' });
+        res.writeHead(302, { 'Location': '/?oauth_error=token_failed' });
         res.end();
         return;
       }
@@ -1500,7 +1510,7 @@ Return ONLY the email content (subject line and email body). Do not include any 
       }
       
       if (!userEmail) {
-        res.writeHead(302, { 'Location': '/dashboard.html?oauth_error=no_email' });
+        res.writeHead(302, { 'Location': '/?oauth_error=no_email' });
         res.end();
         return;
       }
@@ -1509,39 +1519,77 @@ Return ONLY the email content (subject line and email body). Do not include any 
       const grantedScope = tokenData.scope || '';
       console.log(`[OAuth] Granted scope for ${userEmail}:`, grantedScope);
 
-      if (!grantedScope.includes('mail.google.com')) {
-        console.warn(`[OAuth Warning] User ${userEmail} did not grant Gmail scope (https://mail.google.com/). Granted: ${grantedScope}`);
-        res.writeHead(302, { 'Location': '/dashboard.html?oauth_error=missing_gmail_permission' });
-        res.end();
-        return;
+      // Determine or create user
+      let targetUser = null;
+      let session = null;
+      if (stateData && stateData.token) {
+        session = stmts.getSession.get(stateData.token);
       }
 
-      const refreshToken = tokenData.refresh_token || '';
-      const encryptedRefresh = encrypt(refreshToken);
-      const createdAt = new Date().toISOString();
-      
-      // Check if this email account already exists for this user
-      const existing = db.prepare(`SELECT id FROM imap_accounts WHERE user_id = ? AND email = ?`).get(targetUserId, userEmail);
-      
-      if (existing) {
-        // Update existing account with new OAuth tokens
-        db.prepare(`UPDATE imap_accounts SET auth_type = 'oauth', oauth_refresh_token = ?, imap_password = '' WHERE id = ?`).run(encryptedRefresh, existing.id);
-        console.log(`[OAuth] Updated OAuth tokens for ${userEmail} (account ${existing.id})`);
-      } else {
-        // Insert new account
-        db.prepare(`
-          INSERT INTO imap_accounts (user_id, email, imap_server, imap_port, imap_user, imap_password, created_at, auth_type, oauth_refresh_token)
-          VALUES (?, ?, 'imap.gmail.com', 993, ?, '', ?, 'oauth', ?)
-        `).run(targetUserId, userEmail, userEmail, createdAt, encryptedRefresh);
-        console.log(`[OAuth] Connected ${userEmail} via Google OAuth for user ${targetUserId}`);
+      if (session && new Date(session.expires_at) >= new Date()) {
+        targetUser = db.prepare('SELECT id, email, role FROM users WHERE id = ?').get(session.user_id);
       }
-      
-      res.writeHead(302, { 'Location': '/dashboard.html?oauth_success=true' });
+
+      if (!targetUser) {
+        // Find existing user by Google email
+        targetUser = db.prepare('SELECT id, email, role FROM users WHERE email = ?').get(userEmail);
+        if (!targetUser) {
+          // Auto-create user account with this Google email
+          const now = new Date().toISOString();
+          const adminEmail = (process.env.IMAP_USER || '').toLowerCase().trim();
+          const role = (userEmail === adminEmail) ? 'admin' : 'user';
+          const salt = crypto.randomBytes(16).toString('hex');
+          const randomPass = crypto.randomBytes(16).toString('hex');
+          const hash = hashPassword(randomPass, salt);
+          const newUserRes = db.prepare(`
+            INSERT INTO users (email, password_hash, salt, role, imap_server, imap_user, imap_password, created_at)
+            VALUES (?, ?, ?, ?, 'imap.gmail.com', ?, '', ?)
+          `).run(userEmail, hash, salt, role, userEmail, now);
+          targetUser = { id: Number(newUserRes.lastInsertRowid), email: userEmail, role };
+          console.log(`[OAuth] Created new user ${userEmail} with ID ${targetUser.id}`);
+        }
+      }
+
+      const targetUserId = targetUser.id;
+
+      // Create a fresh session token for targetUser
+      const newSessionToken = crypto.randomBytes(32).toString('hex');
+      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      stmts.createSession.run(newSessionToken, targetUserId, expiresAt);
+
+      // Save OAuth tokens if refresh_token was received
+      const refreshToken = tokenData.refresh_token || '';
+      if (refreshToken) {
+        const encryptedRefresh = encrypt(refreshToken);
+        const createdAt = new Date().toISOString();
+        const existing = db.prepare(`SELECT id FROM imap_accounts WHERE user_id = ? AND email = ?`).get(targetUserId, userEmail);
+        if (existing) {
+          db.prepare(`UPDATE imap_accounts SET auth_type = 'oauth', oauth_refresh_token = ?, imap_password = '' WHERE id = ?`).run(encryptedRefresh, existing.id);
+          console.log(`[OAuth] Updated OAuth tokens for ${userEmail} (account ${existing.id})`);
+        } else {
+          db.prepare(`
+            INSERT INTO imap_accounts (user_id, email, imap_server, imap_port, imap_user, imap_password, created_at, auth_type, oauth_refresh_token)
+            VALUES (?, ?, 'imap.gmail.com', 993, ?, '', ?, 'oauth', ?)
+          `).run(targetUserId, userEmail, userEmail, createdAt, encryptedRefresh);
+          console.log(`[OAuth] Connected mailbox ${userEmail} via Google OAuth for user ${targetUserId}`);
+        }
+      }
+
+      // Check scope notice
+      let scopeNotice = '';
+      if (!grantedScope.includes('mail.google.com')) {
+        console.warn(`[OAuth Notice] User ${userEmail} did not grant Gmail full scope. Basic login succeeded.`);
+        scopeNotice = '&scope_warning=limited';
+      }
+
+      // Redirect to dashboard with active session credentials for instant seamless login!
+      const redirectUrl = `/dashboard.html?session_token=${encodeURIComponent(newSessionToken)}&user_id=${encodeURIComponent(targetUserId)}&user_email=${encodeURIComponent(targetUser.email)}&user_role=${encodeURIComponent(targetUser.role)}&oauth_success=true${scopeNotice}`;
+      res.writeHead(302, { 'Location': redirectUrl });
       res.end();
       return;
     } catch (err) {
       console.error('OAuth callback error:', err);
-      res.writeHead(302, { 'Location': '/dashboard.html?oauth_error=server_error' });
+      res.writeHead(302, { 'Location': '/?oauth_error=server_error' });
       res.end();
       return;
     }

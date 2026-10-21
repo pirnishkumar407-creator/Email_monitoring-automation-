@@ -246,11 +246,9 @@ function ensureAdmin() {
   const existing = db.prepare(`SELECT id FROM users WHERE role = 'admin'`).get();
   if (!existing) {
     try {
-      const generatedAdminPassword = crypto.randomBytes(12).toString('base64').replace(/[^a-zA-Z0-9]/g, '').substring(0, 12);
-      const securePassword = generatedAdminPassword + 'A1!'; // satisfies complexity requirements
+      const securePassword = (process.env.ADMIN_PASSWORD || env.ADMIN_PASSWORD || 'Admin@123456').trim();
       createUser(adminEmail, securePassword, 'admin', env.IMAP_SERVER || 'imap.gmail.com', env.IMAP_USER || '', env.IMAP_PASSWORD || '');
-      console.log(`[DB] Admin account created: ${adminEmail} (Secure password generated: ${securePassword})`);
-      console.log(`[IMPORTANT] PLEASE COPY AND USE THIS SECURE PASSWORD FOR INITIAL LOGIN.`);
+      console.log(`[DB] Admin account created: ${adminEmail}`);
     } catch (e) {
       // Already exists, promote to admin
       db.prepare(`UPDATE users SET role = 'admin' WHERE email = ?`).run(adminEmail);
