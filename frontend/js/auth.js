@@ -60,6 +60,43 @@ function showMessage(text, type) {
   msg.style.display = 'block';
 }
 
+async function parseApiResponse(res) {
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    try {
+      const data = await res.json();
+      if (res.status === 401 && (data.message === 'Protected by Vercel Authentication' || (data.error && data.error.message === 'Protected deployment'))) {
+        return {
+          success: false,
+          message: 'This preview deployment has Vercel Authentication enabled. Use https://email-monitoring-automation.vercel.app or disable Deployment Protection in Vercel settings.'
+        };
+      }
+      return data;
+    } catch (_) {}
+  }
+  const text = await res.text();
+  if (res.status === 401 && text.includes('Protected')) {
+    return {
+      success: false,
+      message: 'This preview deployment has Vercel Authentication enabled. Use https://email-monitoring-automation.vercel.app or disable Deployment Protection in Vercel settings.'
+    };
+  }
+  return {
+    success: false,
+    message: text ? text.slice(0, 150) : `Server error (Status ${res.status}).`
+  };
+}
+
+function getFriendlyErrorMessage(err) {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return 'You appear to be offline. Please check your internet connection.';
+  }
+  if (window.location.hostname.includes('vercel.app')) {
+    return 'Connection error. If you are viewing a Vercel preview URL, Vercel Authentication may be blocking API calls. Please open: https://email-monitoring-automation.vercel.app';
+  }
+  return 'Connection error. Is the server running?';
+}
+
 async function handleSignIn(e) {
   e.preventDefault();
   const email = document.getElementById('loginEmail').value.trim();
@@ -75,7 +112,7 @@ async function handleSignIn(e) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
     });
-    const data = await res.json();
+    const data = await parseApiResponse(res);
 
     if (data.success) {
       // Store session
@@ -85,10 +122,10 @@ async function handleSignIn(e) {
       sessionStorage.setItem('user_id', data.user.id);
       window.location.href = '/dashboard.html';
     } else {
-      showMessage(data.message, 'error');
+      showMessage(data.message || 'Invalid email or password.', 'error');
     }
   } catch (err) {
-    showMessage('Connection error. Is the server running?', 'error');
+    showMessage(getFriendlyErrorMessage(err), 'error');
   } finally {
     btn.disabled = false;
     btn.querySelector('span').textContent = 'Sign In';
@@ -121,7 +158,7 @@ async function handleSignUp(e) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password })
     });
-    const data = await res.json();
+    const data = await parseApiResponse(res);
 
     if (data.success) {
       showMessage('Account created! Signing you in...', 'success');
@@ -130,10 +167,10 @@ async function handleSignUp(e) {
       document.getElementById('loginPassword').value = password;
       setTimeout(() => switchTab('signin'), 1500);
     } else {
-      showMessage(data.message, 'error');
+      showMessage(data.message || 'Sign up failed.', 'error');
     }
   } catch (err) {
-    showMessage('Connection error. Is the server running?', 'error');
+    showMessage(getFriendlyErrorMessage(err), 'error');
   } finally {
     btn.disabled = false;
     btn.querySelector('span').textContent = 'Create Account';
@@ -176,7 +213,7 @@ async function handleRequestOTP(e) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email })
     });
-    const data = await res.json();
+    const data = await parseApiResponse(res);
 
     if (data.success) {
       showMessage('OTP sent to your email! Check your inbox.', 'success');
@@ -184,10 +221,10 @@ async function handleRequestOTP(e) {
       document.getElementById('forgotForm').style.display = 'none';
       document.getElementById('resetForm').style.display = 'flex';
     } else {
-      showMessage(data.message, 'error');
+      showMessage(data.message || 'Failed to send OTP.', 'error');
     }
   } catch (err) {
-    showMessage('Connection error. Is the server running?', 'error');
+    showMessage(getFriendlyErrorMessage(err), 'error');
   } finally {
     btn.disabled = false;
     btn.querySelector('span').textContent = 'Send OTP';
@@ -221,7 +258,7 @@ async function handleResetPassword(e) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, otp, password })
     });
-    const data = await res.json();
+    const data = await parseApiResponse(res);
 
     if (data.success) {
       showMessage('Password reset successful! Redirecting...', 'success');
@@ -231,10 +268,10 @@ async function handleResetPassword(e) {
       document.getElementById('confirmResetPassword').value = '';
       setTimeout(() => switchTab('signin'), 2000);
     } else {
-      showMessage(data.message, 'error');
+      showMessage(data.message || 'Password reset failed.', 'error');
     }
   } catch (err) {
-    showMessage('Connection error. Is the server running?', 'error');
+    showMessage(getFriendlyErrorMessage(err), 'error');
   } finally {
     btn.disabled = false;
     btn.querySelector('span').textContent = 'Reset Password';

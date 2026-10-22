@@ -170,6 +170,16 @@ try {
   // Column already exists
 }
 
+try {
+  db.exec(`ALTER TABLE emails ADD COLUMN thread_id TEXT`);
+} catch (e) {
+  // Column already exists
+}
+
+try {
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_emails_user_thread ON emails (user_id, thread_id)`);
+} catch (e) {}
+
 // Migration: Move legacy user IMAP settings to imap_accounts
 try {
   const legacyUsers = db.prepare(`SELECT id, email, imap_server, imap_user, imap_password, created_at FROM users WHERE imap_server IS NOT NULL AND imap_server != ''`).all();
@@ -314,8 +324,8 @@ const stmts = {
     INSERT INTO emails (user_id, sender, subject, body, received_at, priority, status, category, intent, summary, action_items, draft_reply, send_at, requires_approval, imap_account_id)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `),
-  getEmails: db.prepare(`SELECT id, user_id, sender, subject, received_at, priority, status, category, intent, summary, action_items, draft_reply, send_at, requires_approval, imap_account_id FROM emails ORDER BY received_at DESC`),
-  getEmailsByUser: db.prepare(`SELECT id, user_id, sender, subject, received_at, priority, status, category, intent, summary, action_items, draft_reply, send_at, requires_approval, imap_account_id FROM emails WHERE user_id = ? ORDER BY received_at DESC`),
+  getEmails: db.prepare(`SELECT id, user_id, sender, subject, received_at, priority, status, category, intent, summary, action_items, draft_reply, send_at, requires_approval, imap_account_id, thread_id FROM emails ORDER BY received_at DESC`),
+  getEmailsByUser: db.prepare(`SELECT id, user_id, sender, subject, received_at, priority, status, category, intent, summary, action_items, draft_reply, send_at, requires_approval, imap_account_id, thread_id FROM emails WHERE user_id = ? ORDER BY received_at DESC`),
   getEmailById: db.prepare(`SELECT * FROM emails WHERE id = ?`),
   updateEmailStatus: db.prepare(`UPDATE emails SET status = ? WHERE id = ?`),
   updateEmailDraft: db.prepare(`UPDATE emails SET draft_reply = ?, status = 'Pending', edited_at = ?, send_at = ? WHERE id = ?`),

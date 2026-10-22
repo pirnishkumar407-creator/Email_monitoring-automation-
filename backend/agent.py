@@ -399,14 +399,55 @@ def get_existing_email_id(sender, subject, body, user_id=1):
         print(f"[DB Error checking existence] {e}")
         return None
 
-def get_existing_email_id_fast(sender, subject, user_id=1):
+def decode_mime_str(raw):
+    if not raw:
+        return ""
+    if isinstance(raw, bytes):
+        try:
+            from email.header import decode_header
+            decoded_parts = decode_header(raw.decode('utf-8', errors='ignore'))
+            decoded_str = ""
+            for part, charset in decoded_parts:
+                if isinstance(part, bytes):
+                    decoded_str += part.decode(charset or 'utf-8', errors='ignore')
+                else:
+                    decoded_str += str(part)
+            return decoded_str.strip() or raw.decode('utf-8', errors='ignore').strip()
+        except Exception:
+            return raw.decode('utf-8', errors='ignore').strip()
+    return str(raw).strip()
+
+def get_existing_email_id_fast(sender, subject, user_id=1, thread_id=None):
     try:
         conn = sqlite3.connect(DB_FILE, timeout=5.0)
         c = conn.cursor()
-        c.execute("SELECT id FROM emails WHERE user_id = ? AND sender = ? AND subject = ? LIMIT 1", (user_id, sender, subject))
-        row = c.fetchone()
+        if thread_id:
+            c.execute("SELECT id FROM emails WHERE user_id = ? AND thread_id = ? LIMIT 1", (user_id, str(thread_id)))
+            row = c.fetchone()
+            if row:
+                conn.close()
+                return row[0]
+
+        # Extract pure email
+        m = re.search(r'[\w\.-]+@[\w\.-]+', sender or '')
+        pure_email = m.group(0).lower() if m else (sender or '').lower().strip()
+        norm_subj = (subject or '').strip()
+
+        c.execute("SELECT id, sender, subject FROM emails WHERE user_id = ?", (user_id,))
+        for r_id, r_sender, r_subj in c.fetchall():
+            r_m = re.search(r'[\w\.-]+@[\w\.-]+', r_sender or '')
+            r_pure = r_m.group(0).lower() if r_m else (r_sender or '').lower().strip()
+            r_norm_subj = (r_subj or '').strip()
+            if norm_subj == r_norm_subj:
+                if pure_email and r_pure and pure_email == r_pure:
+                    conn.close()
+                    return r_id
+                elif not pure_email or not r_pure:
+                    conn.close()
+                    return r_id
+
         conn.close()
-        return row[0] if row else None
+        return None
     except Exception:
         return None
 
@@ -428,8 +469,13 @@ def insert_email_to_db(email, user_id=1, imap_account_id=None):
             conn.commit()
         except sqlite3.OperationalError:
             pass
+        try:
+            c.execute("ALTER TABLE emails ADD COLUMN thread_id TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
             
-        received_at = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+        received_at = email.get("received_at") or datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         
         # Check auto-reply policy rules
         db_settings = load_db_settings()
@@ -464,8 +510,8 @@ def insert_email_to_db(email, user_id=1, imap_account_id=None):
         action_items_str = json.dumps(email.get("action_items", []))
 
         c.execute('''
-            INSERT INTO emails (user_id, sender, subject, body, received_at, priority, status, category, intent, summary, action_items, draft_reply, send_at, requires_approval, imap_account_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO emails (user_id, sender, subject, body, received_at, priority, status, category, intent, summary, action_items, draft_reply, send_at, requires_approval, imap_account_id, thread_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             user_id,
             email["sender"],
@@ -481,7 +527,8 @@ def insert_email_to_db(email, user_id=1, imap_account_id=None):
             email.get("draft_reply", ""),
             send_at,
             requires_approval,
-            imap_account_id
+            imap_account_id,
+            str(email.get("thread_id")) if email.get("thread_id") else None
         ))
 
         eid = c.lastrowid
@@ -556,14 +603,23 @@ def refresh_google_access_token(refresh_token):
         print(f"[OAuth Error] Failed to refresh token: {e}")
         return None
 
+def parse_envelope_sender(envelope):
+    if not envelope or not envelope.from_:
+        return "unknown@example.com"
+    f = envelope.from_[0]
+    name = decode_mime_str(f.name) if f.name else ""
+    mailbox = f.mailbox.decode('utf-8', errors='ignore') if f.mailbox else ""
+    host = f.host.decode('utf-8', errors='ignore') if f.host else ""
+    email_addr = f"{mailbox}@{host}".strip()
+    if name:
+        return f"{name} <{email_addr}>"
+    return email_addr
+
 # ── Real IMAP Agent ──────────────────────────────────────────────────────────
 
 def run_real_agent(imap_server, imap_user, imap_pass, llm_api_key, user_id=1, imap_account_id=None, auth_type='password', oauth_refresh_token=None):
     if not IMAP_AVAILABLE:
         print("[Error] imapclient not installed. Run: pip install imapclient")
-        return
-    if not llm_api_key or llm_api_key == "your_gemini_api_key_here":
-        print("[Error] Valid GEMINI_API_KEY required. Check settings page or .env.")
         return
 
     print(f"\n--- Starting AI Email Agent for {imap_user} ({imap_server}) [auth: {auth_type}] ---")
@@ -579,133 +635,273 @@ def run_real_agent(imap_server, imap_user, imap_pass, llm_api_key, user_id=1, im
                     print(f"[Error] Failed to refresh OAuth access token for {imap_user}")
                     return
                 # Authenticate with XOAUTH2
-                oauth2_string = f"user={imap_user}\x01auth=Bearer {access_token}\x01\x01"
                 client.oauth2_login(imap_user, access_token)
                 print(f"[IMAP] OAuth2 login successful for {imap_user}!")
             else:
                 client.login(imap_user, imap_pass)
                 print(f"[IMAP] Login successful for {imap_user}!")
-            client.select_folder('INBOX')
 
-            # Strategy: Check UNSEEN first, then also grab today's emails (SINCE today)
-            # This ensures emails read on mobile (marked Seen) are still captured.
-            from datetime import date as _date
-            today_str = _date.today().strftime('%d-%b-%Y')
+            is_gmail = ('gmail.com' in imap_server.lower() or 'gmail.com' in imap_user.lower() or client.has_capability('X-GM-EXT-1'))
 
-            unseen_messages = client.search('UNSEEN')
-            today_messages = client.search(['SINCE', today_str])
+            if is_gmail:
+                # ── GMAIL SYNCHRONIZATION ───────────────────────────────────────
+                # In Gmail, user's inbox view corresponds to Primary category ('category:primary')
+                # and threads ('X-GM-THRID') are displayed as distinct conversation items.
+                client.select_folder('INBOX')
+                primary_msgs = client.search(['X-GM-RAW', 'category:primary'])
+                print(f"[Gmail IMAP] Found {len(primary_msgs)} messages in Primary category.")
 
-            # Combine both lists (unique message IDs)
-            combined = list(set(list(unseen_messages) + list(today_messages)))
-            # Sort so newest IDs (highest number) are last, take last 15 max
-            combined.sort()
-            if len(combined) > 15:
-                combined = combined[-15:]
+                if not primary_msgs:
+                    print("[Gmail IMAP] No messages in Primary inbox.")
+                    return
 
-            if combined:
-                messages = combined
-                print(f"[IMAP] Found {len(messages)} messages to process (UNSEEN: {len(unseen_messages)}, Today: {len(today_messages)}).")
-            else:
-                # Final fallback: last 10 recent messages if inbox is empty today
-                all_msgs = client.search('ALL')
-                if len(all_msgs) > 10:
-                    all_msgs = all_msgs[-10:]
-                messages = all_msgs
-                print(f"[IMAP] No new messages today. Ingesting latest {len(messages)} recent messages from Inbox...")
+                res = client.fetch(primary_msgs, ['X-GM-THRID', 'X-GM-MSGID', 'ENVELOPE', 'INTERNALDATE', 'FLAGS'])
+                threads = {}
+                for mid, d in res.items():
+                    thrid = str(d.get(b'X-GM-THRID', mid))
+                    if thrid not in threads:
+                        threads[thrid] = []
+                    threads[thrid].append((mid, d))
 
+                total_threads = len(threads)
+                print(f"[Gmail IMAP] Grouped into {total_threads} unique Primary conversation threads.")
 
+                conn = sqlite3.connect(DB_FILE, timeout=15.0)
+                c = conn.cursor()
 
-            for msg_id in messages:
-                response = client.fetch(msg_id, ['ENVELOPE'])
-                data = response.get(msg_id)
-                if not data or b'ENVELOPE' not in data:
-                    continue
-                envelope = data[b'ENVELOPE']
-
-                # Parse sender
-                sender_addr = "unknown@example.com"
-                if envelope.from_:
-                    f = envelope.from_[0]
-                    mailbox = f.mailbox.decode('utf-8', errors='ignore') if f.mailbox else ""
-                    host = f.host.decode('utf-8', errors='ignore') if f.host else ""
-                    sender_addr = f"{mailbox}@{host}"
-
-                # Parse subject
-                subject = "No Subject"
-                if envelope.subject:
-                    raw_subj = envelope.subject.decode('utf-8', errors='ignore')
-                    try:
-                        from email.header import decode_header
-                        decoded_parts = decode_header(raw_subj)
-                        decoded_str = ""
-                        for part, charset in decoded_parts:
-                            if isinstance(part, bytes):
-                                decoded_str += part.decode(charset or 'utf-8', errors='ignore')
-                            else:
-                                decoded_str += str(part)
-                        subject = decoded_str.strip() or raw_subj
-                    except Exception:
-                        subject = raw_subj
-
-                # FAST CHECK: Check if this email already exists in our database for this specific user
-                existing_id = get_existing_email_id_fast(sender_addr, subject, user_id)
-                if existing_id:
-                    if msg_id in unseen_messages:
-                        client.add_flags(msg_id, '\\Seen')
-                    continue
-
-                # ONLY fetch RFC822 for NEW emails that are not yet processed!
-                body_resp = client.fetch(msg_id, ['RFC822'])
-                raw_bytes = body_resp.get(msg_id, {}).get(b'RFC822', b'')
-                body = ""
+                # Ensure thread_id column and index exist
                 try:
-                    msg = email_module.message_from_bytes(raw_bytes)
-                    if msg.is_multipart():
-                        for part in msg.walk():
-                            content_type = part.get_content_type()
-                            content_disposition = str(part.get("Content-Disposition"))
-                            if content_type == "text/plain" and "attachment" not in content_disposition:
-                                body = part.get_payload(decode=True).decode('utf-8', errors='ignore')
-                                break
-                            elif content_type == "text/html" and not body and "attachment" not in content_disposition:
-                                html_content = part.get_payload(decode=True).decode('utf-8', errors='ignore')
-                                body = re.sub('<[^<]+?>', '', html_content)
-                    else:
-                        body = msg.get_payload(decode=True).decode('utf-8', errors='ignore')
-                except Exception as ex:
-                    print(f"[Parser Warning] Error parsing MIME body: {ex}")
-                    body = data.get(b'RFC822.TEXT', b'').decode('utf-8', errors='ignore')
+                    c.execute("ALTER TABLE emails ADD COLUMN thread_id TEXT")
+                    conn.commit()
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    c.execute("CREATE INDEX IF NOT EXISTS idx_emails_user_thread ON emails (user_id, thread_id)")
+                    conn.commit()
+                except sqlite3.OperationalError:
+                    pass
 
-                # Fallback if body is empty
-                if not body.strip():
-                    body = "Empty body."
+                c.execute('SELECT id, sender, subject, thread_id, received_at FROM emails WHERE user_id = ?', (user_id,))
+                existing_rows = c.fetchall()
 
-                insights = None
-                if llm_api_key:
-                    insights = generate_with_gemini(llm_api_key, sender_addr, subject, body)
-                
-                if not insights:
-                    print(f"[Fallback] Using local intelligent email classifier for '{subject}'")
-                    insights = heuristic_fallback(sender_addr, subject, body)
+                matched_db_ids = set()
+                matched_thread_ids = set()
 
-                processed = {
-                    "sender": sender_addr,
-                    "subject": subject,
-                    "body": body[:4000],
-                    "priority": insights.get("priority", "Medium"),
-                    "category": insights.get("category", "important"),
-                    "intent": insights.get("intent", ""),
-                    "summary": insights.get("summary", ""),
-                    "action_items": insights.get("action_items", []),
-                    "draft_reply": insights.get("draft_reply", ""),
-                    "requires_approval": 1 if insights.get("requires_approval") else 0
-                }
-                eid = insert_email_to_db(processed, user_id, imap_account_id)
-                if eid:
-                    log_to_excel(eid, sender_addr, subject, processed["priority"], processed["category"], processed["intent"], "Pending")
-                    if msg_id in unseen_messages:
-                        client.add_flags(msg_id, '\\Seen')
-                        print(f"[IMAP] Marked email {msg_id} as Read.")
+                # Step 1: Match by exact thread_id
+                for er in existing_rows:
+                    er_id, er_sender, er_subj, er_thrid, er_recv = er
+                    if er_thrid and er_thrid in threads and er_thrid not in matched_thread_ids:
+                        matched_thread_ids.add(er_thrid)
+                        matched_db_ids.add(er_id)
+
+                # Step 2: Match remaining threads by subject and sender
+                for thrid, msgs in threads.items():
+                    if thrid in matched_thread_ids:
+                        continue
+
+                    latest = max(msgs, key=lambda m: m[1][b'INTERNALDATE'])
+                    env = latest[1][b'ENVELOPE']
+                    subj = decode_mime_str(env.subject) if env.subject else ""
+                    sender = parse_envelope_sender(env)
+                    m_email = re.search(r'[\w\.-]+@[\w\.-]+', sender)
+                    pure_email = m_email.group(0).lower() if m_email else ''
+
+                    best_match = None
+                    for er in existing_rows:
+                        er_id = er[0]
+                        if er_id in matched_db_ids:
+                            continue
+                        er_sender = er[1] or ''
+                        er_subj = er[2] or ''
+                        er_m_email = re.search(r'[\w\.-]+@[\w\.-]+', er_sender)
+                        er_pure_email = er_m_email.group(0).lower() if er_m_email else ''
+
+                        subj_match = False
+                        if subj == er_subj:
+                            subj_match = True
+                        elif subj and er_subj and (subj.lower().strip() == er_subj.lower().strip()):
+                            subj_match = True
+                        elif not subj and not er_subj:
+                            subj_match = True
+
+                        email_match = (pure_email and pure_email == er_pure_email)
+
+                        if subj_match and email_match:
+                            best_match = er
+                            break
+                        elif subj_match and not best_match:
+                            best_match = er
+
+                    if best_match:
+                        matched_thread_ids.add(thrid)
+                        matched_db_ids.add(best_match[0])
+                        c.execute('UPDATE emails SET thread_id = ? WHERE id = ?', (thrid, best_match[0]))
+
+                conn.commit()
+
+                # Step 3: Remove extraneous / non-primary / duplicate DB records
+                stray_ids = [er[0] for er in existing_rows if er[0] not in matched_db_ids]
+                if stray_ids:
+                    print(f"[Sync] Cleaning {len(stray_ids)} non-primary/duplicate records from database...")
+                    c.execute(f"DELETE FROM tasks WHERE email_id IN ({','.join(['?']*len(stray_ids))})", stray_ids)
+                    c.execute(f"DELETE FROM emails WHERE id IN ({','.join(['?']*len(stray_ids))})", stray_ids)
+                    conn.commit()
+
+                # Step 4: Ingest missing threads
+                missing_threads = [t for t in threads if t not in matched_thread_ids]
+                if missing_threads:
+                    print(f"[Sync] Ingesting {len(missing_threads)} new/missing threads from Gmail Primary...")
+                    for thrid in missing_threads:
+                        latest = max(threads[thrid], key=lambda m: m[1][b'INTERNALDATE'])
+                        mid = latest[0]
+                        env = latest[1][b'ENVELOPE']
+                        subj = decode_mime_str(env.subject) if env.subject else "No Subject"
+                        sender = parse_envelope_sender(env)
+                        dt = latest[1][b'INTERNALDATE']
+                        iso_date = dt.astimezone(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+                        body_resp = client.fetch(mid, ['RFC822'])
+                        raw_bytes = body_resp.get(mid, {}).get(b'RFC822', b'')
+                        body = ""
+                        try:
+                            msg = email_module.message_from_bytes(raw_bytes)
+                            if msg.is_multipart():
+                                for part in msg.walk():
+                                    content_type = part.get_content_type()
+                                    content_disposition = str(part.get("Content-Disposition"))
+                                    if content_type == "text/plain" and "attachment" not in content_disposition:
+                                        body = part.get_payload(decode=True).decode('utf-8', errors='ignore')
+                                        break
+                                    elif content_type == "text/html" and not body and "attachment" not in content_disposition:
+                                        html_content = part.get_payload(decode=True).decode('utf-8', errors='ignore')
+                                        body = re.sub('<[^<]+?>', '', html_content)
+                            else:
+                                body = msg.get_payload(decode=True).decode('utf-8', errors='ignore')
+                        except Exception:
+                            body = "Empty body."
+
+                        if not body or not body.strip():
+                            body = "Empty body."
+
+                        insights = None
+                        if llm_api_key and not llm_api_key.startswith("test-key") and not llm_api_key.startswith("•••"):
+                            try:
+                                insights = generate_with_gemini(llm_api_key, sender, subj, body)
+                            except Exception:
+                                pass
+
+                        if not insights:
+                            insights = heuristic_fallback(sender, subj, body)
+
+                        email_data = {
+                            "sender": sender,
+                            "subject": subj,
+                            "body": body[:4000],
+                            "priority": insights.get("priority", "Medium"),
+                            "category": insights.get("category", "important"),
+                            "intent": insights.get("intent", ""),
+                            "summary": insights.get("summary", ""),
+                            "action_items": insights.get("action_items", []),
+                            "draft_reply": insights.get("draft_reply", ""),
+                            "requires_approval": 1 if insights.get("requires_approval") else 0,
+                            "received_at": iso_date,
+                            "thread_id": thrid
+                        }
+
+                        eid = insert_email_to_db(email_data, user_id=user_id, imap_account_id=imap_account_id)
+                        if eid:
+                            log_to_excel(eid, sender, subj, email_data["priority"], email_data["category"], email_data["intent"], "Pending")
+
+                c.execute('SELECT COUNT(*) FROM emails WHERE user_id = ?', (user_id,))
+                final_count = c.fetchone()[0]
+                conn.close()
+                print(f"[OK] Synchronization complete: Gmail Primary ({total_threads}) == Project DB ({final_count})")
+
+            else:
+                # ── STANDARD IMAP FALLBACK ─────────────────────────────────────
+                client.select_folder('INBOX')
+                from datetime import date as _date
+                today_str = _date.today().strftime('%d-%b-%Y')
+                unseen_messages = client.search('UNSEEN')
+                today_messages = client.search(['SINCE', today_str])
+                combined = list(set(list(unseen_messages) + list(today_messages)))
+                combined.sort()
+                if len(combined) > 15:
+                    combined = combined[-15:]
+
+                if combined:
+                    messages = combined
+                else:
+                    all_msgs = client.search('ALL')
+                    if len(all_msgs) > 10:
+                        all_msgs = all_msgs[-10:]
+                    messages = all_msgs
+
+                for msg_id in messages:
+                    response = client.fetch(msg_id, ['ENVELOPE'])
+                    data = response.get(msg_id)
+                    if not data or b'ENVELOPE' not in data:
+                        continue
+                    envelope = data[b'ENVELOPE']
+                    sender_addr = parse_envelope_sender(envelope)
+                    subject = decode_mime_str(envelope.subject) if envelope.subject else "No Subject"
+
+                    existing_id = get_existing_email_id_fast(sender_addr, subject, user_id)
+                    if existing_id:
+                        if msg_id in unseen_messages:
+                            client.add_flags(msg_id, '\\Seen')
+                        continue
+
+                    body_resp = client.fetch(msg_id, ['RFC822'])
+                    raw_bytes = body_resp.get(msg_id, {}).get(b'RFC822', b'')
+                    body = ""
+                    try:
+                        msg = email_module.message_from_bytes(raw_bytes)
+                        if msg.is_multipart():
+                            for part in msg.walk():
+                                content_type = part.get_content_type()
+                                content_disposition = str(part.get("Content-Disposition"))
+                                if content_type == "text/plain" and "attachment" not in content_disposition:
+                                    body = part.get_payload(decode=True).decode('utf-8', errors='ignore')
+                                    break
+                                elif content_type == "text/html" and not body and "attachment" not in content_disposition:
+                                    html_content = part.get_payload(decode=True).decode('utf-8', errors='ignore')
+                                    body = re.sub('<[^<]+?>', '', html_content)
+                        else:
+                            body = msg.get_payload(decode=True).decode('utf-8', errors='ignore')
+                    except Exception as ex:
+                        body = data.get(b'RFC822.TEXT', b'').decode('utf-8', errors='ignore')
+
+                    if not body.strip():
+                        body = "Empty body."
+
+                    insights = None
+                    if llm_api_key and not llm_api_key.startswith("test-key") and not llm_api_key.startswith("•••"):
+                        try:
+                            insights = generate_with_gemini(llm_api_key, sender_addr, subject, body)
+                        except Exception:
+                            pass
+
+                    if not insights:
+                        insights = heuristic_fallback(sender_addr, subject, body)
+
+                    processed = {
+                        "sender": sender_addr,
+                        "subject": subject,
+                        "body": body[:4000],
+                        "priority": insights.get("priority", "Medium"),
+                        "category": insights.get("category", "important"),
+                        "intent": insights.get("intent", ""),
+                        "summary": insights.get("summary", ""),
+                        "action_items": insights.get("action_items", []),
+                        "draft_reply": insights.get("draft_reply", ""),
+                        "requires_approval": 1 if insights.get("requires_approval") else 0
+                    }
+                    eid = insert_email_to_db(processed, user_id, imap_account_id)
+                    if eid:
+                        log_to_excel(eid, sender_addr, subject, processed["priority"], processed["category"], processed["intent"], "Pending")
+                        if msg_id in unseen_messages:
+                            client.add_flags(msg_id, '\\Seen')
 
                 time.sleep(0.5)
 
